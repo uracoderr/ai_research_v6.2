@@ -298,8 +298,22 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
             "duplicates_removed": duplicates_removed,
             "llm_ranking_success": llm_success,
         }
+
+        # Shared list so the thread callback can post per-section updates
+        # back to the polling endpoint without needing locks (GIL is enough
+        # here since we only ever append from the executor thread and read
+        # from the asyncio thread, and list.append is GIL-atomic).
+        _section_log: list = []
+
+        def _on_section_done(section_title: str, done: int, total: int) -> None:
+            msg = f"✍️ Writing ({done}/{total}): {section_title}…"
+            _section_log.append(msg)
+            if job_id in RESEARCH_JOBS:
+                RESEARCH_JOBS[job_id]["message"] = msg
+
         final_report, meta = await asyncio.to_thread(
-            generate_report, optimized_topic, scraped_data, scraped_sources, language, stats_dict, mode
+            generate_report, optimized_topic, scraped_data, scraped_sources,
+            language, stats_dict, mode, _on_section_done
         )
         llm_calls += len(config.REPORT_MODES[mode]["sections"])
 

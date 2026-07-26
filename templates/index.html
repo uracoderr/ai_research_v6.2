@@ -191,7 +191,7 @@
                 <form onsubmit="startResearch(event)" class="bg-slate-900/80 p-5 md:p-6 rounded-2xl border border-slate-800 shadow-xl space-y-4">
                     <div>
                         <label class="text-xs font-bold text-slate-400 uppercase">Research Topic</label>
-                        <textarea id="topic-input" rows="3" required placeholder="e.g. Future of Artificial Intelligence in 2026..."
+                        <textarea id="topic-input" rows="3" required
                                   class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm mt-1 focus:border-teal-500 outline-none transition resize-none"></textarea>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
@@ -253,14 +253,34 @@
                         <p class="text-xs text-slate-500">Usually takes 30–90 seconds</p>
                     </div>
 
+                    <!-- Live stats panel -->
+                    <div id="live-stats" class="w-full text-left space-y-1.5 text-[11px] text-slate-400 border border-slate-700/40 rounded-xl px-4 py-3 bg-slate-900/50">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500">🔍 Results found</span>
+                            <span id="stat-found" class="font-mono text-slate-300">—</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500">⚖️ After filtering</span>
+                            <span id="stat-ranked" class="font-mono text-slate-300">—</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500">📄 Articles read</span>
+                            <span id="stat-extracted" class="font-mono text-slate-300">—</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500">✍️ Writing section</span>
+                            <span id="stat-section" class="font-mono text-slate-300">—</span>
+                        </div>
+                    </div>
+
                     <!-- Thin gradient progress bar -->
                     <div class="space-y-2">
-                        <div class="w-full bg-slate-800/70 rounded-full h-[3px] overflow-hidden">
-                            <div id="progress-bar" class="progress-gradient h-full rounded-full transition-all duration-700" style="width:2%"></div>
+                        <div class="w-full bg-slate-800/70 rounded-full h-[5px] overflow-hidden">
+                            <div id="progress-bar" class="progress-gradient h-full rounded-full transition-all duration-500" style="width:0%"></div>
                         </div>
                         <div class="flex justify-between text-[10px] text-slate-600">
-                            <span>Researching</span>
-                            <span id="progress-pct">2%</span>
+                            <span id="progress-phase">Starting…</span>
+                            <span id="progress-pct">0%</span>
                         </div>
                     </div>
                 </div>
@@ -664,61 +684,113 @@
         // ── Loading stepper ───────────────────────────────────────────────────
         let progressTimer = null;
         let progressValue  = 0;
+        let progressTarget = 0;   // phase waypoint we're ticking toward
+        const PROGRESS_TICK_MS  = 400;   // how often we tick
+        const PROGRESS_TICK_STEP = 0.6;  // % added per tick — slow, steady
 
-        // Maps raw backend messages → friendly one-liners shown to the user
-        const STEP_MAP = [
-            { match: /cache/i,                  label: '⚡ Serving from cache — instant results!' },
-            { match: /PHASE 0|Understanding/i,  label: '🧭 Understanding your topic…' },
-            { match: /PHASE 1|Searching/i,      label: '🔍 Deep-searching high-authority sources…' },
-            { match: /refined|optimized/i,      label: '✨ Query optimised for best results…' },
-            { match: /Found \d+/i,              label: '📦 Candidate sources discovered…' },
-            { match: /PHASE 2|Ranking|credib/i, label: '⚖️ Ranking sources by credibility…' },
-            { match: /selected/i,               label: '✅ Top sources selected…' },
-            { match: /PHASE 3|Reading|Extracti/i, label: '📄 Reading full articles…' },
-            { match: /PHASE 4|Writing/i,        label: '✍️ AI is synthesising your report…' },
-            { match: /ready|done/i,             label: '🚀 Finalising your study tools…' },
+        // Phase waypoints: when a message matching each pattern arrives,
+        // jump progress forward to at least this target (never backward).
+        const PHASE_TARGETS = [
+            { match: /cache/i,                    target: 95, phase: '⚡ Cache hit' },
+            { match: /PHASE 0|Understanding/i,    target: 8,  phase: '🧭 Understanding topic…' },
+            { match: /refined|optimized|Query/i,  target: 14, phase: '✨ Query refined' },
+            { match: /PHASE 1|Searching/i,        target: 20, phase: '🔍 Searching sources…' },
+            { match: /Found \d+/i,                target: 35, phase: '📦 Sources found' },
+            { match: /PHASE 2|Ranking|credib/i,   target: 40, phase: '⚖️ Ranking sources…' },
+            { match: /selected/i,                 target: 55, phase: '✅ Best sources picked' },
+            { match: /PHASE 3|Reading|Extracti/i, target: 58, phase: '📄 Reading articles…' },
+            { match: /Extracted content/i,        target: 72, phase: '📄 Articles read' },
+            { match: /PHASE 4|Writing your/i,     target: 75, phase: '✍️ Writing report…' },
+            { match: /Writing \(\d+\/\d+\)/i,     target: 0,  phase: null }, // handled separately
+            { match: /ready|done/i,               target: 97, phase: '🚀 Finalising…' },
         ];
 
         function friendlyStep(msg) {
-            for (const s of STEP_MAP) {
-                if (s.match.test(msg)) return s.label;
+            // Section-level updates: "✍️ Writing (2/6): Background…"
+            const secMatch = msg.match(/Writing \((\d+)\/(\d+)\):\s*(.+)/i);
+            if (secMatch) return `✍️ Writing section ${secMatch[1]}/${secMatch[2]}: ${secMatch[3]}`;
+            for (const s of PHASE_TARGETS) {
+                if (s.phase && s.match.test(msg)) return s.phase;
             }
-            return msg; // fall back to the raw message if nothing matched
+            return msg;
+        }
+
+        function _applyPhaseTarget(msg) {
+            for (const s of PHASE_TARGETS) {
+                if (!s.match.test(msg)) continue;
+                if (s.target === 0) {
+                    // Section writing — advance proportionally
+                    const m = msg.match(/Writing \((\d+)\/(\d+)\)/i);
+                    if (m) {
+                        const done = parseInt(m[1]), total = parseInt(m[2]);
+                        const t = 75 + Math.round((done / total) * 20);
+                        if (t > progressTarget) progressTarget = t;
+                    }
+                } else {
+                    if (s.target > progressTarget) progressTarget = s.target;
+                }
+                break;
+            }
+        }
+
+        function _updateStatFromMsg(msg) {
+            // Live stats panel
+            let m;
+            if ((m = msg.match(/Found (\d+) candidate/i)))
+                document.getElementById('stat-found').textContent = m[1] + ' results';
+            if ((m = msg.match(/(\d+) high.quality sources selected/i)))
+                document.getElementById('stat-ranked').textContent = m[1] + ' sources';
+            if ((m = msg.match(/Extracted content from (\d+)/i)))
+                document.getElementById('stat-extracted').textContent = m[1] + ' articles';
+            if ((m = msg.match(/Writing \(\d+\/\d+\):\s*(.+)/i))) {
+                document.getElementById('stat-section').textContent = m[1].replace(/…$/, '');
+            }
         }
 
         function setStep(msg) {
+            _applyPhaseTarget(msg);
+            _updateStatFromMsg(msg);
+            // Update the phase label under the progress bar
+            const friendly = friendlyStep(msg);
+            const phaseEl = document.getElementById('progress-phase');
+            if (phaseEl) phaseEl.textContent = friendly.replace(/^[^\s]+\s/, '').replace(/…$/, '');
             const el = document.getElementById('status-text');
             if (!el) return;
-            // Cross-fade: out → swap → in
             el.classList.remove('step-in');
             el.classList.add('step-out');
             setTimeout(() => {
-                el.textContent = friendlyStep(msg);
+                el.textContent = friendly;
                 el.classList.remove('step-out');
                 el.classList.add('step-in');
             }, 300);
         }
 
+        function _setProgressUI(pct) {
+            const p = Math.round(pct);
+            document.getElementById('progress-bar').style.width = pct.toFixed(1) + '%';
+            document.getElementById('progress-pct').textContent = p + '%';
+        }
+
         function startFakeProgress() {
-            const pBar = document.getElementById('progress-bar');
-            const pPct = document.getElementById('progress-pct');
-            progressValue = 0;
-            pBar.style.width = '2%';
-            pPct.innerText = '2%';
+            progressValue  = 0;
+            progressTarget = 5;   // minimum initial target so bar starts moving
+            _setProgressUI(0);
             clearInterval(progressTimer);
             progressTimer = setInterval(() => {
-                const remaining = 92 - progressValue;
-                const step = Math.max(0.1, remaining * 0.028);
-                progressValue = Math.min(92, progressValue + step);
-                pBar.style.width = progressValue.toFixed(1) + '%';
-                pPct.innerText = Math.round(progressValue) + '%';
-            }, 100);
+                // Tick toward target at constant speed; never exceed it until
+                // a new phase message bumps the target higher.
+                if (progressValue < progressTarget) {
+                    progressValue = Math.min(progressTarget, progressValue + PROGRESS_TICK_STEP);
+                    _setProgressUI(progressValue);
+                }
+            }, PROGRESS_TICK_MS);
         }
 
         function finishFakeProgress() {
             clearInterval(progressTimer);
-            document.getElementById('progress-bar').style.width = '100%';
-            document.getElementById('progress-pct').innerText = '100%';
+            progressValue  = 100;
+            progressTarget = 100;
+            _setProgressUI(100);
         }
 
         function stopFakeProgress() {
@@ -1419,6 +1491,53 @@
                 if (btn && btn.tagName === 'BUTTON') { const orig = btn.innerText; btn.innerText = 'Copied!'; setTimeout(() => { btn.innerText = orig; }, 1500); }
             }).catch(() => {});
         }
+
+        // ── Rotating placeholder examples ─────────────────────────────────────
+        (function rotatePlaceholder() {
+            const EXAMPLES = [
+                'e.g. Impact of Artificial Intelligence on Healthcare in 2025',
+                'e.g. Climate Change and Renewable Energy Transition',
+                'e.g. Blockchain Technology in Supply Chain Management',
+                'e.g. Mental Health Effects of Social Media on Teenagers',
+                'e.g. Rise of Electric Vehicles and the Future of Mobility',
+                'e.g. Quantum Computing: Breakthroughs and Challenges',
+                'e.g. Food Security and Vertical Farming Innovations',
+                'e.g. Cybersecurity Threats in the Age of AI',
+                'e.g. The Metaverse: Opportunities and Risks',
+                'e.g. Space Exploration and the Commercial Space Race',
+                'e.g. Gene Editing (CRISPR) and Its Ethical Implications',
+                'e.g. Digital Currency and the Future of Banking',
+            ];
+            const textarea = document.getElementById('topic-input');
+            if (!textarea) return;
+            // Pick a random starting index, then cycle on each focus
+            let idx = Math.floor(Math.random() * EXAMPLES.length);
+            textarea.placeholder = EXAMPLES[idx];
+            textarea.addEventListener('focus', () => {
+                idx = (idx + 1) % EXAMPLES.length;
+                textarea.placeholder = EXAMPLES[idx];
+            });
+        })();
+
+        // Reset live-stats panel on new research
+        const _origStartResearch = window.startResearch;
+        (function patchStartResearch() {
+            const origEl = document.getElementById.bind(document);
+            // Reset stat cells whenever terminal-container becomes visible
+            const observer = new MutationObserver(() => {
+                const tc = document.getElementById('terminal-container');
+                if (tc && !tc.classList.contains('hidden')) {
+                    ['stat-found','stat-ranked','stat-extracted','stat-section'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.textContent = '—';
+                    });
+                    const pp = document.getElementById('progress-phase');
+                    if (pp) pp.textContent = 'Starting…';
+                }
+            });
+            const tc = document.getElementById('terminal-container');
+            if (tc) observer.observe(tc, { attributes: true, attributeFilter: ['class'] });
+        })();
     </script>
 </body>
 </html>

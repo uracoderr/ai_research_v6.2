@@ -234,6 +234,7 @@ def generate_report(
     language: str,
     stats: dict,
     mode: str = None,
+    on_section_done=None,
 ) -> Tuple[str, dict]:
     mode = mode if mode in config.REPORT_MODES else config.DEFAULT_REPORT_MODE
     mode_config = config.REPORT_MODES[mode]
@@ -256,14 +257,22 @@ def generate_report(
     confidence_score, avg_credibility = _compute_confidence_score(scraped_sources, stats)
 
     results = {}
+    total_sections = len(sections)
+    done_count = 0
     with ThreadPoolExecutor(max_workers=len(sections)) as executor:
         futures = {
-            executor.submit(_generate_section, section, topic, scraped_text, language): section["title"]
+            executor.submit(_generate_section, section, topic, scraped_text, language): section
             for section in sections
         }
         for future in as_completed(futures):
+            section_cfg = futures[future]
             title, content = future.result()
             results[title] = content
+            done_count += 1
+            if on_section_done:
+                # Strip emoji prefix for a cleaner status line
+                clean_title = title.split(" ", 1)[-1] if title and title[0] in "📖🧩🔍⚖️🚀✅📊📚⚙️🌍⚠️🔮" else title
+                on_section_done(clean_title, done_count, total_sections)
 
     references_md = _build_references(scraped_sources)
 

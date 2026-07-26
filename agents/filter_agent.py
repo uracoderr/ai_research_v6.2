@@ -13,6 +13,7 @@ Fixes vs the original version:
   isn't a full "scheme://host/..." URL)
 """
 import json
+import re
 from typing import Dict, List, Tuple
 
 from utils.llm_client import LLMError, call_nvidia_api
@@ -23,10 +24,30 @@ logger = get_logger(__name__)
 SOCIAL_DOMAINS = [
     "facebook.com", "instagram.com", "twitter.com", "x.com",
     "youtube.com", "reddit.com", "tiktok.com", "pinterest.com",
+    "linkedin.com", "snapchat.com", "tumblr.com", "quora.com",
+    "medium.com/m/", "t.me", "telegram.me", "whatsapp.com",
 ]
+
+# Patterns that suggest garbage third-level / forum / spam domains
+JUNK_PATTERNS = [
+    r"\.blogspot\.", r"\.wordpress\.com", r"\.weebly\.com", r"\.wixsite\.com",
+    r"\.tripod\.com", r"\.angelfire\.com", r"\.geocities\.", r"\.fandom\.com",
+    r"\.wikia\.com", r"answers\.yahoo", r"\.ask\.com", r"\.ehow\.com",
+    r"\.livejournal\.com", r"\.hubpages\.com", r"\.ezinearticles\.com",
+    r"\.selfgrowth\.com", r"clickbait", r"\.buzzfeed\.com", r"\.dailymail\.co",
+]
+
 HIGH_TRUST_DOMAINS = [
-    ".gov", ".edu", "reuters.com", "bloomberg.com", "mckinsey.com",
+    ".gov", ".edu", ".ac.uk", ".ac.in", ".ac.jp",
+    "reuters.com", "bloomberg.com", "mckinsey.com",
     "nature.com", "who.int", "un.org", "ieee.org",
+    "sciencedirect.com", "pubmed.ncbi.nlm.nih.gov", "scholar.google.com",
+    "jstor.org", "springer.com", "researchgate.net", "arxiv.org",
+    "bbc.com", "nytimes.com", "theguardian.com", "ft.com",
+    "wsj.com", "economist.com", "harvard.edu", "mit.edu",
+    "stanford.edu", "oxford.ac.uk", "cambridge.org",
+    "worldbank.org", "imf.org", "oecd.org", "statista.com",
+    "pewresearch.org", "brookings.edu",
 ]
 
 
@@ -57,12 +78,22 @@ def fallback_ranker(articles: List[Dict], top_n: int) -> Tuple[List[Dict], int, 
     return ranked[:top_n], 0, 0, False
 
 
+def _is_junk_url(url: str) -> bool:
+    """Returns True for social media, garbage blog farms, and low-quality third-level domains."""
+    url_lower = url.lower()
+    if any(d in url_lower for d in SOCIAL_DOMAINS):
+        return True
+    if any(re.search(pat, url_lower) for pat in JUNK_PATTERNS):
+        return True
+    return False
+
+
 def filter_and_rank_articles(articles: List[Dict], top_n: int = 16) -> Tuple[List[Dict], int, int, bool]:
     """
     Returns (ranked_articles, social_links_dropped, llm_calls_made, llm_ranking_succeeded).
     """
     logger.info("PHASE 2: ranking %s articles for credibility", len(articles))
-    clean_articles = [a for a in articles if not any(d in a.get("url", "").lower() for d in SOCIAL_DOMAINS)]
+    clean_articles = [a for a in articles if not _is_junk_url(a.get("url", ""))]
     social_dropped = len(articles) - len(clean_articles)
 
     if not clean_articles:
