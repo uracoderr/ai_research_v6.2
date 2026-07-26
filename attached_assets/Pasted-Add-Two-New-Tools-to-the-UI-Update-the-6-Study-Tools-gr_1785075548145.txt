@@ -1,0 +1,16 @@
+Add Two New Tools to the UI:
+Update the '6 Study Tools' grid to '8 Study Tools'. Add the following two tool cards with matching UI styling:
+​Tool 7: "Humanizer" (Icon: ✍️) - Description: "Rewrite reports in a natural, human style to bypass AI detection."
+​Tool 8: "Smart Flashcards" (Icon: 🗂️) - Description: "Quick question-answer cards for active recall and memorization."
+​2. Dynamic Language Support (Hindi/Hinglish):
+Update the system prompt logic for all interactive tools (AI Tutor, Viva Mode, Quiz, etc.). The tools must dynamically detect the language of the source report or the user's prompt.
+​If the base report is in Hindi, all tools must generate outputs and interact purely in Hindi.
+​If the user queries in Hinglish, the AI Tutor and Viva Mode must maintain the context and respond naturally in Hinglish. Pass the language_preference dynamically to the LLM context.
+​3. Fix Podcast TTS Audio Pause:
+Optimize the audio generation pipeline for the 'Live AI Script' feature. Currently, there is an unnaturally long pause when switching between Host A and Host B. Implement a fix to stitch the audio files seamlessly and reduce latency/silence between speaker transitions to ensure a smooth, conversational flow.
+​4. API Integration & Deep Optimization of Phase 1 (Search):
+​I will provide the API keys for NVIDIA (for LLM inference) and Tavily (for web search). Integrate them securely and efficiently.
+​CRITICAL: Deeply analyze Phase 1 (Search and Research phase). Review the Tavily search logic, query formulation, and data aggregation handled by the NVIDIA model. If there are any gaps, logic flaws, shallow research results, or missing edge cases, please write the necessary code to fill those gaps. Make Phase 1 incredibly robust so the foundation of the generated report is flawless.
+​5. Comprehensive End-to-End Testing:
+​Act as a QA engineer and thoroughly test all phases of the app end-to-end.
+​Ensure data flows seamlessly from the initial Phase 1 search, to report generation, and finally to all 8 interactive tools without any breakage or context loss. Fix any bugs encountered during this simulated testing.
