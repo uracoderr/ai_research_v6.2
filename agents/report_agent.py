@@ -179,7 +179,6 @@ def generate_report(
     body = "".join(f"\n## {s['title']}\n{results.get(s['title'], '_Section unavailable._')}\n" for s in sections)
     body += f"\n## 📚 References\n{references_md}\n"
 
-
     word_count = len(body.split())
     reading_minutes = max(1, round(word_count / 200))
 

@@ -461,7 +461,10 @@ async def api_upload_report(request: Request, file: UploadFile = File(...)):
             detail="Couldn't find enough readable text in that file. If it's a scanned PDF (photos of pages), text extraction won't work on it.",
         )
 
-    topic_guess = validate_topic(os.path.splitext(filename)[0][:150] or "Uploaded Report")
+    try:
+        topic_guess = validate_topic(os.path.splitext(filename)[0][:150] or "Uploaded Report")
+    except ValueError:
+        topic_guess = "Uploaded Report"
     word_count = len(text.split())
     metrics = {
         "time_seconds": 0,

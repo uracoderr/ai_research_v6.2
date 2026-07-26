@@ -267,7 +267,12 @@ def list_reports(session_id: str) -> List[Dict[str, str]]:
             items.append({"safe_topic": slug, "title": slug.replace("_", " ").title()})
     # Newest first, by actual file modification time - os.listdir() order is
     # filesystem-dependent and was never a reliable proxy for "most recent".
-    items.sort(key=lambda item: os.path.getmtime(os.path.join(folder, item["safe_topic"] + suffix)), reverse=True)
+    def _mtime(item):
+        try:
+            return os.path.getmtime(os.path.join(folder, item["safe_topic"] + suffix))
+        except OSError:
+            return 0
+    items.sort(key=_mtime, reverse=True)
 
     if not items:
         # Local disk has nothing for this session (e.g. right after a

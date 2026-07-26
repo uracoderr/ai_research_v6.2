@@ -94,7 +94,11 @@ def filter_and_rank_articles(articles: List[Dict], top_n: int = 16) -> Tuple[Lis
             idx = item.get("i")
             if idx is not None and 0 <= idx < len(clean_articles):
                 original = clean_articles[idx]
-                original["credibility_score"] = item.get("c", 6)
+                raw_score = item.get("c", 6)
+                try:
+                    original["credibility_score"] = int(raw_score)
+                except (TypeError, ValueError):
+                    original["credibility_score"] = 6
                 original["source_name"] = item.get("s") or _source_name_from_url(original.get("url", ""))
                 ranked_articles.append(original)
 
