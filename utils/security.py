@@ -24,7 +24,6 @@ import html
 import re
 from typing import Optional
 
-import bleach
 from bs4 import BeautifulSoup
 
 _SLUG_RE = re.compile(r"[^a-z0-9\-_]+")
@@ -34,13 +33,12 @@ MAX_SLUG_LENGTH = 80
 MIN_TOPIC_LENGTH = 3
 MAX_TOPIC_LENGTH = 300
 
-ALLOWED_TAGS = [
+ALLOWED_TAGS = {
     "h1", "h2", "h3", "h4", "p", "ul", "ol", "li", "strong", "em", "b", "i",
     "a", "table", "thead", "tbody", "tr", "th", "td", "code", "pre",
     "blockquote", "br", "hr", "span",
-]
+}
 ALLOWED_ATTRS = {"a": ["href", "title"]}
-ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 
 
 def safe_slug(text: Optional[str], max_length: int = MAX_SLUG_LENGTH) -> str:
@@ -76,20 +74,29 @@ def sanitize_html(dirty_html: str) -> str:
     Allow-list sanitiser for any HTML that came from the LLM or from
     markdown-rendered LLM output, before it is ever sent to the browser.
     Also forces every surviving link to open safely in a new tab.
+
+    Uses only BeautifulSoup (no bleach dependency) — strips any tag not in
+    ALLOWED_TAGS and removes all attributes except those explicitly allowed.
     """
     if not dirty_html:
         return ""
-    cleaned = bleach.clean(
-        dirty_html,
-        tags=ALLOWED_TAGS,
-        attributes=ALLOWED_ATTRS,
-        protocols=ALLOWED_PROTOCOLS,
-        strip=True,
-    )
-    soup = BeautifulSoup(cleaned, "html.parser")
-    for a in soup.find_all("a", href=True):
-        a["target"] = "_blank"
-        a["rel"] = "noopener noreferrer nofollow"
+    soup = BeautifulSoup(dirty_html, "html.parser")
+    for tag in soup.find_all(True):
+        if tag.name not in ALLOWED_TAGS:
+            tag.unwrap()  # keep inner text, remove the wrapper element
+        else:
+            # Strip every attribute not in the allow-list for this tag
+            allowed = ALLOWED_ATTRS.get(tag.name, [])
+            for attr in list(tag.attrs):
+                if attr not in allowed:
+                    del tag.attrs[attr]
+            # Force links open safely and block dangerous href schemes
+            if tag.name == "a":
+                href = tag.attrs.get("href", "")
+                if href and not re.match(r"^(https?|mailto):", href, re.I):
+                    tag.attrs["href"] = "#"
+                tag["target"] = "_blank"
+                tag["rel"] = "noopener noreferrer nofollow"
     return str(soup)
 
 

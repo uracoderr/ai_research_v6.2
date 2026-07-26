@@ -25,10 +25,6 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
-
 import config
 from agents.filter_agent import filter_and_rank_articles
 from agents.report_agent import (
@@ -65,11 +61,7 @@ except RuntimeError as e:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-limiter = Limiter(key_func=get_remote_address)
-
 app = FastAPI(title="ThesisPilot AI Research Agent")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS is only added if the operator explicitly configures extra origins.
 # Same-origin browser usage (the normal case - this same app serves the
@@ -303,7 +295,6 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
 
 
 @app.post("/api/research/start", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_RESEARCH)
 async def api_start_research(request: Request, payload: ResearchRequest):
     existing_session = session.read_session_id(request)
     session_id = existing_session or uuid.uuid4().hex
@@ -355,7 +346,6 @@ async def api_research_status(job_id: str, request: Request):
 # Interactive tools
 # ---------------------------------------------------------------------------
 @app.post("/generate-podcast", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_podcast(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
@@ -371,7 +361,6 @@ async def api_podcast(request: Request, response: Response, payload: ReportTextR
 
 
 @app.post("/generate-diagram", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_diagram(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
@@ -383,7 +372,6 @@ async def api_diagram(request: Request, response: Response, payload: ReportTextR
 
 
 @app.post("/generate-quiz", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_quiz(request: Request, response: Response, payload: QuizRequest):
     session.ensure_session(request, response)
     try:
@@ -395,7 +383,6 @@ async def api_quiz(request: Request, response: Response, payload: QuizRequest):
 
 
 @app.post("/generate-audio", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_TTS)
 async def api_tts(request: Request, response: Response, payload: TTSRequest):
     """
     Natural-sounding podcast audio via Microsoft Edge's free neural TTS (no
@@ -434,7 +421,6 @@ def _extract_pdf_text(raw_bytes: bytes):
 
 
 @app.post("/api/upload-report", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_RESEARCH)
 async def api_upload_report(request: Request, file: UploadFile = File(...)):
     """
     Lets a student skip the research pipeline entirely: upload an existing
@@ -515,7 +501,6 @@ async def api_upload_report(request: Request, file: UploadFile = File(...)):
 
 
 @app.post("/grade-answer", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_grade_answer(request: Request, response: Response, payload: GradeAnswerRequest):
     session.ensure_session(request, response)
     try:
@@ -529,7 +514,6 @@ async def api_grade_answer(request: Request, response: Response, payload: GradeA
 
 
 @app.post("/generate-slides", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_slides(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
@@ -541,7 +525,6 @@ async def api_slides(request: Request, response: Response, payload: ReportTextRe
 
 
 @app.post("/ask-rag", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_ask_rag(request: Request, response: Response, payload: InteractiveRequest):
     session_id = session.ensure_session(request, response)
     context = await asyncio.to_thread(report_store.load_context, session_id, payload.safe_topic)
@@ -556,7 +539,6 @@ async def api_ask_rag(request: Request, response: Response, payload: Interactive
 
 
 @app.post("/challenge-report", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_challenge(request: Request, response: Response, payload: InteractiveRequest):
     session_id = session.ensure_session(request, response)
     context = await asyncio.to_thread(report_store.load_context, session_id, payload.safe_topic)
@@ -571,7 +553,6 @@ async def api_challenge(request: Request, response: Response, payload: Interacti
 
 
 @app.post("/humanize-report", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_humanize(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
@@ -583,7 +564,6 @@ async def api_humanize(request: Request, response: Response, payload: ReportText
 
 
 @app.post("/generate-flashcards", dependencies=[Depends(require_access_key)])
-@limiter.limit(config.RATE_LIMIT_CHAT)
 async def api_flashcards(request: Request, response: Response, payload: FlashcardsRequest):
     session.ensure_session(request, response)
     try:

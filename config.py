@@ -10,24 +10,8 @@ import os
 import secrets
 
 from dotenv import load_dotenv
-from rich.console import Console
-from rich.theme import Theme
 
 load_dotenv()  # loads .env if present; harmless no-op in production where real env vars are injected
-
-# ---------------------------------------------------------------------------
-# CLI console theme (used only by main.py)
-# ---------------------------------------------------------------------------
-custom_theme = Theme({
-    "info": "cyan",
-    "success": "bold green",
-    "warning": "bold yellow",
-    "error": "bold red",
-    "step": "bold magenta",
-    "highlight": "bold yellow",
-    "interactive": "bold cyan",
-})
-console = Console(theme=custom_theme)
 
 # ---------------------------------------------------------------------------
 # API keys (required - see .env.example)
@@ -54,27 +38,21 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 
 # ---------------------------------------------------------------------------
-# Rate limiting (per client IP) - protects your API budget from abuse
-# ---------------------------------------------------------------------------
-RATE_LIMIT_RESEARCH = os.getenv("RATE_LIMIT_RESEARCH", "6/hour")
-RATE_LIMIT_CHAT = os.getenv("RATE_LIMIT_CHAT", "40/hour")
-
-# ---------------------------------------------------------------------------
 # Search (Tavily) tuning
 #   "basic" search depth is materially faster than "advanced" and loses
 #   little accuracy here since every page gets fully re-scraped by us
 #   anyway - Tavily's job is just to find good candidate URLs.
 # ---------------------------------------------------------------------------
 SEARCH_DEPTH = os.getenv("TAVILY_SEARCH_DEPTH", "basic")
-SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", 16))
+SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", 8))   # reduced for low-CPU hosts
 SEARCH_TIMEOUT = int(os.getenv("SEARCH_TIMEOUT", 15))
 
 # ---------------------------------------------------------------------------
 # Scraping tuning
 # ---------------------------------------------------------------------------
-SCRAPE_TARGET_SUCCESS = int(os.getenv("SCRAPE_TARGET_SUCCESS", 8))
+SCRAPE_TARGET_SUCCESS = int(os.getenv("SCRAPE_TARGET_SUCCESS", 6))
 SCRAPE_TIMEOUT = int(os.getenv("SCRAPE_TIMEOUT", 8))
-SCRAPE_MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", 16))
+SCRAPE_MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", 4))   # reduced for low-CPU/RAM hosts
 SCRAPE_CHAR_LIMIT = int(os.getenv("SCRAPE_CHAR_LIMIT", 6000))          # per-article cap fed to the LLM
 REPORT_CONTEXT_CHAR_LIMIT = int(os.getenv("REPORT_CONTEXT_CHAR_LIMIT", 10000))
 
@@ -129,7 +107,6 @@ SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "reports")
 #   TTS_ENABLED=false to skip it and always use the browser voice.
 # ---------------------------------------------------------------------------
 TTS_ENABLED = os.getenv("TTS_ENABLED", "true").lower() == "true"
-RATE_LIMIT_TTS = os.getenv("RATE_LIMIT_TTS", "300/hour")  # a whole podcast play needs many small calls
 
 # Accent x gender voice matrix for the podcast accent selector. These are
 # real, well-established Microsoft neural voice IDs - override any of them
