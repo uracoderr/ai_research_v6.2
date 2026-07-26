@@ -34,11 +34,13 @@ from agents.filter_agent import filter_and_rank_articles
 from agents.report_agent import (
     challenge_query,
     generate_diagram,
+    generate_flashcards,
     generate_podcast_script,
     generate_quiz,
     generate_report,
     generate_slides,
     grade_short_answer,
+    humanize_report,
     rag_query,
 )
 from agents.scraper_agent import scrape_top_articles
@@ -117,11 +119,19 @@ class ResearchRequest(BaseModel):
 
 class ReportTextRequest(BaseModel):
     report_text: str = Field(..., max_length=20000)
+    language: str = "english"
 
 
 class QuizRequest(BaseModel):
     report_text: str = Field(..., max_length=20000)
     num_questions: int = Field(5, ge=1, le=20)
+    language: str = "english"
+
+
+class FlashcardsRequest(BaseModel):
+    report_text: str = Field(..., max_length=20000)
+    num_cards: int = Field(10, ge=5, le=20)
+    language: str = "english"
 
 
 class TTSRequest(BaseModel):
@@ -133,12 +143,14 @@ class TTSRequest(BaseModel):
 class InteractiveRequest(BaseModel):
     safe_topic: str = Field(..., max_length=120)
     query: str = Field(..., min_length=1, max_length=1000)
+    language: str = "english"
 
 
 class GradeAnswerRequest(BaseModel):
     question: str = Field(..., max_length=500)
     key_points: str = Field("", max_length=500)
     answer: str = Field(..., min_length=1, max_length=2000)
+    language: str = "english"
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +359,7 @@ async def api_research_status(job_id: str, request: Request):
 async def api_podcast(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
-        script = await asyncio.to_thread(generate_podcast_script, payload.report_text)
+        script = await asyncio.to_thread(generate_podcast_script, payload.report_text, payload.language)
         # Sent raw on purpose - see templates/index.html's playPodcastStream().
         # generate_podcast_script() already coerces to str and caps length; the
         # frontend escapes it (only for the on-screen bubble, not for
@@ -363,7 +375,7 @@ async def api_podcast(request: Request, response: Response, payload: ReportTextR
 async def api_diagram(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
-        mermaid_code = await asyncio.to_thread(generate_diagram, payload.report_text)
+        mermaid_code = await asyncio.to_thread(generate_diagram, payload.report_text, payload.language)
         return {"mermaid": mermaid_code}
     except Exception as e:
         logger.error("Diagram endpoint error: %s", e)
@@ -375,7 +387,7 @@ async def api_diagram(request: Request, response: Response, payload: ReportTextR
 async def api_quiz(request: Request, response: Response, payload: QuizRequest):
     session.ensure_session(request, response)
     try:
-        questions = await asyncio.to_thread(generate_quiz, payload.report_text, payload.num_questions)
+        questions = await asyncio.to_thread(generate_quiz, payload.report_text, payload.num_questions, payload.language)
         return {"questions": questions}
     except Exception as e:
         logger.error("Quiz endpoint error: %s", e)
@@ -507,7 +519,9 @@ async def api_upload_report(request: Request, file: UploadFile = File(...)):
 async def api_grade_answer(request: Request, response: Response, payload: GradeAnswerRequest):
     session.ensure_session(request, response)
     try:
-        result = await asyncio.to_thread(grade_short_answer, payload.question, payload.key_points, payload.answer)
+        result = await asyncio.to_thread(
+            grade_short_answer, payload.question, payload.key_points, payload.answer, payload.language
+        )
         return result
     except Exception as e:
         logger.error("Grading endpoint error: %s", e)
@@ -519,7 +533,7 @@ async def api_grade_answer(request: Request, response: Response, payload: GradeA
 async def api_slides(request: Request, response: Response, payload: ReportTextRequest):
     session.ensure_session(request, response)
     try:
-        slides = await asyncio.to_thread(generate_slides, payload.report_text)
+        slides = await asyncio.to_thread(generate_slides, payload.report_text, payload.language)
         return {"slides": slides}
     except Exception as e:
         logger.error("Slides endpoint error: %s", e)
@@ -534,7 +548,7 @@ async def api_ask_rag(request: Request, response: Response, payload: Interactive
     if context is None:
         return {"answer": "Context not found for this report. Please regenerate it."}
     try:
-        answer = await asyncio.to_thread(rag_query, context, payload.query)
+        answer = await asyncio.to_thread(rag_query, context, payload.query, payload.language)
         return {"answer": sanitize_html(markdown.markdown(answer))}
     except Exception as e:
         logger.error("RAG endpoint error: %s", e)
@@ -549,11 +563,35 @@ async def api_challenge(request: Request, response: Response, payload: Interacti
     if context is None:
         return {"answer": "Context not found for this report. Please regenerate it."}
     try:
-        answer = await asyncio.to_thread(challenge_query, context, payload.query)
+        answer = await asyncio.to_thread(challenge_query, context, payload.query, payload.language)
         return {"answer": sanitize_html(markdown.markdown(answer))}
     except Exception as e:
         logger.error("Challenge endpoint error: %s", e)
         return JSONResponse(status_code=500, content={"error": "Could not process that right now."})
+
+
+@app.post("/humanize-report", dependencies=[Depends(require_access_key)])
+@limiter.limit(config.RATE_LIMIT_CHAT)
+async def api_humanize(request: Request, response: Response, payload: ReportTextRequest):
+    session.ensure_session(request, response)
+    try:
+        humanized = await asyncio.to_thread(humanize_report, payload.report_text, payload.language)
+        return {"humanized": humanized}
+    except Exception as e:
+        logger.error("Humanizer endpoint error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Could not humanize the report right now."})
+
+
+@app.post("/generate-flashcards", dependencies=[Depends(require_access_key)])
+@limiter.limit(config.RATE_LIMIT_CHAT)
+async def api_flashcards(request: Request, response: Response, payload: FlashcardsRequest):
+    session.ensure_session(request, response)
+    try:
+        cards = await asyncio.to_thread(generate_flashcards, payload.report_text, payload.num_cards, payload.language)
+        return {"cards": cards}
+    except Exception as e:
+        logger.error("Flashcards endpoint error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Could not generate flashcards right now."})
 
 
 # ---------------------------------------------------------------------------

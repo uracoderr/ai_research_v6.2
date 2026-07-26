@@ -205,6 +205,7 @@ def generate_report(
         "mode": mode,
         "mode_label": mode_config["label"],
         "model_used": f"NVIDIA Llama-3.1 ({config.MODEL_QUALITY.split('/')[-1]} + {config.MODEL_FAST.split('/')[-1]})",
+        "language": (language or "english").lower(),
     }
     return report_text, meta
 
@@ -213,9 +214,11 @@ def generate_report(
 # Interactive tools: podcast script, mind-map diagram, RAG chat, debate mode
 # ---------------------------------------------------------------------------
 
-def generate_podcast_script(report_text: str) -> List[Dict]:
+def generate_podcast_script(report_text: str, language: str = "english") -> List[Dict]:
+    lang_instruction = _language_instruction(language)
     prompt = (
         "Convert this report into a fun, natural 2-person podcast script (Host A and Host B). "
+        f"{lang_instruction} "
         "RETURN STRICTLY A JSON ARRAY, nothing else. "
         'Format: [{"speaker": "Host A", "text": "..."}]\n\n'
         f"Report:\n{report_text[:6000]}"
@@ -240,7 +243,7 @@ def generate_podcast_script(report_text: str) -> List[Dict]:
         return [{"speaker": "System", "text": "Podcast generation failed. Please try again."}]
 
 
-def generate_diagram(report_text: str) -> str:
+def generate_diagram(report_text: str, language: str = "english") -> str:
     prompt = f"""You are a strict Mermaid.js compiler. Create a flowchart summarising the core pillars of this report.
 RULES:
 1. Start exactly with 'graph TD'.
@@ -268,9 +271,11 @@ Report:
     return "\n".join(valid_lines) if valid_lines else "graph TD\n Z[Diagram unavailable] --> Y[Please try again]"
 
 
-def rag_query(context: str, query: str) -> str:
+def rag_query(context: str, query: str, language: str = "english") -> str:
+    lang_instruction = _language_instruction(language)
     prompt = (
-        f"Answer the question using ONLY the context below. If the answer isn't in the context, say so.\n\n"
+        f"Answer the question using ONLY the context below. If the answer isn't in the context, say so. "
+        f"{lang_instruction}\n\n"
         f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nQuestion: {query}"
     )
     try:
@@ -280,10 +285,12 @@ def rag_query(context: str, query: str) -> str:
         return "Sorry, I couldn't process that question right now. Please try again."
 
 
-def challenge_query(context: str, query: str) -> str:
+def challenge_query(context: str, query: str, language: str = "english") -> str:
+    lang_instruction = _language_instruction(language)
     prompt = (
-        f"Act as a critical, evidence-based debater. Respond to this challenge using ONLY the context below.\n\n"
-        f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nChallenge: {query}"
+        f"Act as a critical, evidence-based examiner. Respond to this answer using ONLY the context below. "
+        f"Ask follow-up questions to probe deeper understanding. {lang_instruction}\n\n"
+        f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nStudent's answer: {query}"
     )
     try:
         return call_nvidia_api(prompt, max_tokens=900, temperature=0.3, model="fast", retries=2)
@@ -296,7 +303,7 @@ def challenge_query(context: str, query: str) -> str:
 # Viva Prep / Auto-Quiz - self-test tool for pre-submission / pre-viva practice
 # ---------------------------------------------------------------------------
 
-def generate_quiz(report_text: str, num_questions: int = 5) -> List[Dict]:
+def generate_quiz(report_text: str, num_questions: int = 5, language: str = "english") -> List[Dict]:
     """
     Generates `num_questions` quiz questions from a finished report - a mix
     of multiple choice (instantly self-gradable in the browser) and
@@ -310,10 +317,11 @@ def generate_quiz(report_text: str, num_questions: int = 5) -> List[Dict]:
     # scale the token budget accordingly instead of a one-size-fits-all cap.
     max_tokens = min(4500, 350 + num_questions * 220)
 
+    lang_instruction = _language_instruction(language)
     prompt = f"""Based on this report, create exactly {num_questions} quiz questions to test whether a
 student understood the material - like practice for a viva / oral exam. Make about {mcq_count}
 multiple-choice ("mcq") and {short_count} short-answer ("short") questions, covering the report's
-most important ideas.
+most important ideas. {lang_instruction}
 
 RETURN STRICTLY A JSON ARRAY, nothing else. Format:
 [
@@ -358,9 +366,11 @@ Report:
         return []
 
 
-def grade_short_answer(question: str, key_points: str, student_answer: str) -> Dict:
+def grade_short_answer(question: str, key_points: str, student_answer: str, language: str = "english") -> Dict:
     """Grades a free-text answer against what a good answer should cover. Uses the fast 8B model."""
+    lang_instruction = _language_instruction(language)
     prompt = f"""A student answered this practice viva/exam question. Grade it fairly and briefly.
+{lang_instruction}
 
 Question: {question}
 What a good answer should cover: {key_points or "(use your own judgement based on the question)"}
@@ -392,17 +402,18 @@ Respond with STRICT JSON only, nothing else:
 # Auto-Slides - condenses the report into a presentation outline
 # ---------------------------------------------------------------------------
 
-def generate_slides(report_text: str) -> List[Dict]:
+def generate_slides(report_text: str, language: str = "english") -> List[Dict]:
     """
     Summarises a report into 5-6 presentation slides (short title + a few
     bullet points each), for a "generate my class presentation" shortcut.
     Uses the fast 8B model - this is a compression/summarisation task, not
     one that needs the heavier model's deeper synthesis.
     """
+    lang_instruction = _language_instruction(language)
     prompt = f"""Summarise this report into exactly 5-6 presentation slides for a short class
 presentation. Each slide needs a short title (under 8 words) and 3-5 concise bullet points (each
 under 15 words). The first slide should be a title/overview slide, the last should be a
-conclusion/takeaways slide.
+conclusion/takeaways slide. {lang_instruction}
 
 RETURN STRICTLY A JSON ARRAY, nothing else. Format:
 [{{"title": "...", "bullets": ["...", "...", "..."]}}]
@@ -431,3 +442,90 @@ Report:
     except (LLMError, json.JSONDecodeError) as e:
         logger.error("Slide generation failed: %s", e)
         return [{"title": "Slides unavailable", "bullets": ["Please try again."]}]
+
+
+# ---------------------------------------------------------------------------
+# Humanizer - rewrites AI-generated text to sound more natural
+# ---------------------------------------------------------------------------
+
+def humanize_report(report_text: str, language: str = "english") -> str:
+    """
+    Rewrites the report in a more natural, conversational style to reduce
+    AI-detection markers, while preserving all facts and citations.
+    Uses the quality 70B model for better stylistic variety.
+    """
+    lang_instruction = _language_instruction(language)
+    prompt = f"""Rewrite the following AI-generated report to sound more natural, human, and
+conversational — as if a knowledgeable student wrote it themselves. Rules:
+- Keep every fact, statistic, and citation exactly as-is.
+- Vary sentence length naturally (mix short punchy sentences with longer ones).
+- Replace robotic transitions ("Furthermore,", "Moreover,", "In conclusion,")
+  with more natural ones ("The data also shows...", "What's striking here is...").
+- Keep all headings and structure.
+- Do NOT add new information or remove existing content.
+- Do NOT include any preamble or meta-commentary — start the rewritten text directly.
+{lang_instruction}
+
+Report to rewrite:
+{report_text[:9000]}
+"""
+    try:
+        return call_nvidia_api(
+            prompt,
+            system="You are an expert editor who makes AI-generated text sound naturally human while preserving all facts.",
+            max_tokens=2500,
+            temperature=0.75,
+            model="quality",
+            retries=2,
+        )
+    except LLMError as e:
+        logger.error("Humanizer failed: %s", e)
+        return "_Humanization failed. Please try again._"
+
+
+# ---------------------------------------------------------------------------
+# Smart Flashcards - Q&A cards for active recall
+# ---------------------------------------------------------------------------
+
+def generate_flashcards(report_text: str, num_cards: int = 10, language: str = "english") -> List[Dict]:
+    """
+    Generates concise question-answer flashcards from a report for active
+    recall practice. Uses the fast 8B model.
+    """
+    num_cards = max(5, min(20, int(num_cards)))
+    lang_instruction = _language_instruction(language)
+    max_tokens = min(3000, 200 + num_cards * 130)
+    prompt = f"""Create exactly {num_cards} flashcards from this report for active recall memorization.
+Each card must have a concise question (under 20 words) and a clear, brief answer (1-3 sentences).
+Cover the most important concepts, definitions, facts, and arguments from the report.
+{lang_instruction}
+
+RETURN STRICTLY A JSON ARRAY, nothing else. Format:
+[{{"question": "...", "answer": "..."}}]
+
+Report:
+{report_text[:6000]}
+"""
+    try:
+        raw = call_nvidia_api(
+            prompt,
+            system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
+            max_tokens=max_tokens,
+            temperature=0.4,
+            model="fast",
+            retries=2,
+        )
+        match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
+        if not match:
+            raise LLMError("No JSON array found in flashcards response.")
+        cards = json.loads(match.group(0))
+        clean = []
+        for c in cards[:num_cards]:
+            q = str(c.get("question", "")).strip()[:300]
+            a = str(c.get("answer", "")).strip()[:400]
+            if q and a:
+                clean.append({"question": q, "answer": a})
+        return clean or [{"question": "Error", "answer": "Could not generate flashcards. Please try again."}]
+    except (LLMError, json.JSONDecodeError) as e:
+        logger.error("Flashcard generation failed: %s", e)
+        return [{"question": "Error", "answer": "Could not generate flashcards. Please try again."}]

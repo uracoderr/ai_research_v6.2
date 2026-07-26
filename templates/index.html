@@ -189,7 +189,7 @@
 
                     <div class="lg:col-span-1 space-y-4 md:sticky top-6">
                         <div id="tools-panel" class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                            <h4 class="font-bold text-teal-400 mb-3 border-b border-slate-800 pb-2 text-sm">🎯 One Research → 6 Study Tools</h4>
+                            <h4 class="font-bold text-teal-400 mb-3 border-b border-slate-800 pb-2 text-sm">🎯 One Research → 8 Study Tools</h4>
                             <div class="grid grid-cols-2 lg:grid-cols-1 gap-2.5">
                                 <button onclick="openTab('podcast-tab'); startPodcastMode();" class="bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/30 p-2.5 rounded-lg text-left transition">
                                     <div class="text-xs font-bold">🎙️ Podcast</div>
@@ -214,6 +214,14 @@
                                 <button onclick="openTab('slides-tab'); startSlidesMode();" class="bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 p-2.5 rounded-lg text-left transition">
                                     <div class="text-xs font-bold">📊 PPT Generator</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Presentation slides, ready to go</div>
+                                </button>
+                                <button onclick="openTab('humanizer-tab'); startHumanizerMode();" class="bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 p-2.5 rounded-lg text-left transition">
+                                    <div class="text-xs font-bold">✍️ Humanizer</div>
+                                    <div class="text-[10px] font-normal opacity-70 mt-0.5">Rewrite in natural, human style</div>
+                                </button>
+                                <button onclick="openTab('flashcards-tab'); startFlashcardsMode();" class="bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/30 p-2.5 rounded-lg text-left transition">
+                                    <div class="text-xs font-bold">🗂️ Smart Flashcards</div>
+                                    <div class="text-[10px] font-normal opacity-70 mt-0.5">Q&A cards for active recall</div>
                                 </button>
                             </div>
                         </div>
@@ -286,6 +294,24 @@
                                     <button onclick="nextSlide()" class="text-[10px] bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded">Next ▶</button>
                                 </div>
                             </div>
+                            <div id="humanizer-tab" class="tab-content h-full flex-col">
+                                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                                    <h5 class="font-bold text-rose-400 text-xs">✍️ Humanized Report</h5>
+                                    <button onclick="copyHumanized()" class="text-[10px] bg-rose-600/20 text-rose-300 px-2 py-0.5 rounded">Copy</button>
+                                </div>
+                                <div id="humanizer-box" class="flex-grow overflow-y-auto text-xs text-slate-300 leading-relaxed">Generating human-style rewrite...</div>
+                            </div>
+                            <div id="flashcards-tab" class="tab-content h-full flex-col">
+                                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                                    <h5 class="font-bold text-violet-400 text-xs">🗂️ Smart Flashcards</h5>
+                                    <div class="flex gap-1.5 items-center">
+                                        <input type="number" id="flashcard-count-input" min="5" max="20" value="10"
+                                               class="w-14 text-center bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px] outline-none focus:border-violet-500">
+                                        <button onclick="startFlashcardsMode()" class="text-[10px] bg-violet-600/20 text-violet-300 px-2 py-0.5 rounded hover:bg-violet-600/30 transition">↺ Regenerate</button>
+                                    </div>
+                                </div>
+                                <div id="flashcards-box" class="flex-grow overflow-y-auto space-y-2 text-xs pr-1">Generating flashcards...</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -296,6 +322,7 @@
     <script>
         mermaid.initialize({ startOnLoad: false, theme: 'dark' });
         let currentTopic = "";
+        let currentLanguage = "english"; // tracks language of the currently loaded report
 
         // ---------------------------------------------------------------
         // Small helpers
@@ -451,6 +478,7 @@
                 const data = await res.json();
                 if (data.report) {
                     currentTopic = data.safe_topic;
+                    if (data.metrics && data.metrics.language) currentLanguage = data.metrics.language;
                     document.getElementById('res-topic').innerText = data.topic;
                     document.getElementById('download-md').href = data.md_download;
                     document.getElementById('download-html').href = data.html_download;
@@ -520,6 +548,7 @@
             const lang = document.getElementById('lang-input').value;
             const mode = document.getElementById('mode-input').value;
             if (!topic) return;
+            currentLanguage = lang;
 
             document.getElementById('form-container').classList.add('hidden');
             document.getElementById('terminal-container').classList.remove('hidden');
@@ -614,6 +643,7 @@
                     finishFakeProgress();
                     const result = job.result;
                     currentTopic = result.metrics.safe_topic;
+                    if (result.metrics.language) currentLanguage = result.metrics.language;
                     document.getElementById('res-topic').innerText = result.topic;
                     document.getElementById('download-md').href = result.metrics.md_download;
                     document.getElementById('download-html').href = result.metrics.html_download;
@@ -702,7 +732,7 @@
             try {
                 const res = await apiFetch('/generate-podcast', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report})
+                    body: JSON.stringify({report_text: report, language: currentLanguage})
                 });
                 if (!res) return;
                 const data = await res.json();
@@ -803,6 +833,27 @@
             }
 
             let i = 0;
+            // Prefetch cache: key = segment index, value = Promise resolving
+            // to {blob, kind} or null. Fetching N+1 while N is playing
+            // eliminates the silence gap between speaker turns.
+            const prefetchCache = {};
+
+            async function fetchAudioSegment(idx) {
+                if (idx >= scriptArr.length) return null;
+                const ln = scriptArr[idx];
+                const k = voiceFor(ln.speaker);
+                try {
+                    const r = await apiFetch('/generate-audio', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: ln.text, voice_kind: k, accent: getPodcastAccent() })
+                    });
+                    if (r && r.ok && (r.headers.get('content-type') || '').includes('audio')) {
+                        return { blob: await r.blob(), kind: k };
+                    }
+                } catch (e) { /* fall through */ }
+                return null;
+            }
+
             async function playNext() {
                 if (!podcastPlaying || i >= scriptArr.length) return;
                 const line = scriptArr[i];
@@ -816,28 +867,34 @@
                 const color = kind === 'male' ? 'text-teal-400' : 'text-emerald-400';
                 box.innerHTML = `<strong class="${color}">${escapeHtml(line.speaker)}:</strong> <span class="text-white">${escapeHtml(line.text)}</span>`;
 
-                // Try natural, human-sounding cloud TTS first.
-                try {
-                    const res = await apiFetch('/generate-audio', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: line.text, voice_kind: kind, accent: getPodcastAccent() })
-                    });
-                    if (res && res.ok && (res.headers.get('content-type') || '').includes('audio')) {
-                        const blob = await res.blob();
-                        const url = URL.createObjectURL(blob);
-                        const audio = new Audio(url);
-                        audio.playbackRate = getPodcastSpeed();
-                        window.currentAudio = audio;
-                        audio.onended = () => { URL.revokeObjectURL(url); i++; playNext(); };
-                        audio.onerror = () => { URL.revokeObjectURL(url); if (podcastPlaying) speakWithBrowserVoice(line, kind); };
-                        if (!podcastPlaying) return;
-                        await audio.play();
-                        return;
-                    }
-                } catch (e) { /* fall through to the browser voice below */ }
+                // Kick off prefetch for the NEXT segment in parallel so it's
+                // ready (or nearly ready) by the time this one finishes.
+                if (i + 1 < scriptArr.length && !prefetchCache[i + 1]) {
+                    prefetchCache[i + 1] = fetchAudioSegment(i + 1);
+                }
+
+                // Use cached promise if available, otherwise fetch now.
+                if (!prefetchCache[i]) prefetchCache[i] = fetchAudioSegment(i);
+                const result = await prefetchCache[i];
+                delete prefetchCache[i];
+
+                if (result && result.blob) {
+                    const url = URL.createObjectURL(result.blob);
+                    const audio = new Audio(url);
+                    audio.playbackRate = getPodcastSpeed();
+                    window.currentAudio = audio;
+                    audio.onended = () => { URL.revokeObjectURL(url); i++; playNext(); };
+                    audio.onerror = () => { URL.revokeObjectURL(url); if (podcastPlaying) speakWithBrowserVoice(line, kind); };
+                    if (!podcastPlaying) return;
+                    await audio.play();
+                    return;
+                }
 
                 if (podcastPlaying) speakWithBrowserVoice(line, kind);
             }
+            // Pre-fetch the very first segment immediately so it's ready by
+            // the time the user hears the initial "Generating script..." flash.
+            prefetchCache[0] = fetchAudioSegment(0);
             playNext();
         }
 
@@ -856,7 +913,7 @@
             try {
                 const res = await apiFetch('/generate-diagram', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report})
+                    body: JSON.stringify({report_text: report, language: currentLanguage})
                 });
                 if (!res) return;
                 if (!res.ok) throw new Error(`Server error (Status: ${res.status}). Check backend logs.`);
@@ -891,7 +948,7 @@
             try {
                 const res = await apiFetch(endpoint, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({safe_topic: currentTopic, query: query})
+                    body: JSON.stringify({safe_topic: currentTopic, query: query, language: currentLanguage})
                 });
                 const typingEl = document.getElementById(`typing-${boxId}`);
                 if (!res) { if (typingEl) typingEl.remove(); return; }
@@ -926,7 +983,7 @@
             try {
                 const res = await apiFetch('/generate-quiz', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report, num_questions: numQuestions})
+                    body: JSON.stringify({report_text: report, num_questions: numQuestions, language: currentLanguage})
                 });
                 if (!res) return;
                 const data = await res.json();
@@ -1000,7 +1057,7 @@
             try {
                 const res = await apiFetch('/grade-answer', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({question: q.question, key_points: q.key_points || '', answer})
+                    body: JSON.stringify({question: q.question, key_points: q.key_points || '', answer, language: currentLanguage})
                 });
                 if (!res) return;
                 const data = await res.json();
@@ -1028,7 +1085,7 @@
             try {
                 const res = await apiFetch('/generate-slides', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report})
+                    body: JSON.stringify({report_text: report, language: currentLanguage})
                 });
                 if (!res) return;
                 const data = await res.json();
@@ -1061,6 +1118,82 @@
 
         function nextSlide() { if (currentSlideIdx < slidesData.length - 1) { currentSlideIdx++; renderSlide(); } }
         function prevSlide() { if (currentSlideIdx > 0) { currentSlideIdx--; renderSlide(); } }
+
+        // Interactive Tools - Humanizer
+        let humanizerText = "";
+
+        async function startHumanizerMode() {
+            const report = document.getElementById('report-content').innerText;
+            const box = document.getElementById('humanizer-box');
+            box.innerHTML = "<span class='text-rose-400 animate-pulse'>Rewriting in human style… this may take a moment.</span>";
+            humanizerText = "";
+            try {
+                const res = await apiFetch('/humanize-report', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({report_text: report, language: currentLanguage})
+                });
+                if (!res) return;
+                const data = await res.json();
+                if (data.humanized) {
+                    humanizerText = data.humanized;
+                    // Render as simple paragraphs
+                    box.innerHTML = data.humanized
+                        .split(/\n+/)
+                        .filter(l => l.trim())
+                        .map(l => `<p class="mb-2 text-slate-300 leading-relaxed">${escapeHtml(l)}</p>`)
+                        .join('');
+                } else {
+                    box.innerHTML = `<span class="text-red-400">${escapeHtml(data.error || 'Could not humanize right now.')}</span>`;
+                }
+            } catch(e) { box.innerHTML = `<span class="text-red-400">${escapeHtml(e.message)}</span>`; }
+        }
+
+        function copyHumanized() {
+            if (!humanizerText) return;
+            navigator.clipboard.writeText(humanizerText).then(() => {
+                const btn = document.activeElement;
+                if (btn && btn.tagName === 'BUTTON') {
+                    const orig = btn.innerText; btn.innerText = 'Copied!';
+                    setTimeout(() => { btn.innerText = orig; }, 1500);
+                }
+            }).catch(() => {});
+        }
+
+        // Interactive Tools - Smart Flashcards
+        let flashcardsData = [];
+        let currentCardIdx = 0;
+
+        async function startFlashcardsMode() {
+            const report = document.getElementById('report-content').innerText;
+            const countInput = document.getElementById('flashcard-count-input');
+            const numCards = Math.min(20, Math.max(5, parseInt(countInput.value, 10) || 10));
+            const box = document.getElementById('flashcards-box');
+            box.innerHTML = `<span class="text-violet-400 animate-pulse">Generating ${numCards} flashcards…</span>`;
+            flashcardsData = [];
+            currentCardIdx = 0;
+            try {
+                const res = await apiFetch('/generate-flashcards', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({report_text: report, num_cards: numCards, language: currentLanguage})
+                });
+                if (!res) return;
+                const data = await res.json();
+                flashcardsData = data.cards || [];
+                renderFlashcards();
+            } catch(e) { box.innerHTML = `<span class="text-red-400">${escapeHtml(e.message)}</span>`; }
+        }
+
+        function renderFlashcards() {
+            const box = document.getElementById('flashcards-box');
+            if (!flashcardsData.length) { box.innerHTML = "<span class='text-red-400'>No flashcards generated. Please try again.</span>"; return; }
+            box.innerHTML = flashcardsData.map((card, idx) => `
+                <div class="bg-slate-950 border border-violet-500/20 rounded-lg p-2.5 cursor-pointer hover:border-violet-500/50 transition"
+                     onclick="this.querySelector('.card-answer').classList.toggle('hidden')">
+                    <div class="font-semibold text-white text-[11px] leading-snug">${idx + 1}. ${escapeHtml(card.question)}</div>
+                    <div class="card-answer hidden mt-1.5 pt-1.5 border-t border-violet-500/20 text-violet-200 text-[10px] leading-relaxed">${escapeHtml(card.answer)}</div>
+                    <div class="text-[9px] text-slate-600 mt-1">Tap to reveal answer</div>
+                </div>`).join('');
+        }
 
         function copyAllSlides() {
             if (!slidesData.length) return;
