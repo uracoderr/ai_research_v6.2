@@ -222,7 +222,7 @@ def generate_podcast_script(report_text: str) -> List[Dict]:
     )
     try:
         raw = call_nvidia_api(prompt, max_tokens=1500, temperature=0.3, model="fast", retries=2)
-        match = re.search(r"\[\s*\{.*?\}\s*\]", raw, re.DOTALL)
+        match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
         if not match:
             raise LLMError("No JSON array found in podcast response.")
         script = json.loads(match.group(0))
