@@ -266,6 +266,11 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
                 RESEARCH_JOBS[job_id].update({"status": "done", "message": "✅ Served from cache!", "result": cached_result})
             return
 
+        def _set_stat(key: str, value) -> None:
+            """Update a single phase_stats field without overwriting others."""
+            if job_id in RESEARCH_JOBS:
+                RESEARCH_JOBS[job_id]["phase_stats"][key] = value
+
         update("▶ PHASE 0: Understanding your topic...")
         optimized_topic = await asyncio.to_thread(optimize_query, clean_topic)
         llm_calls += 1
@@ -276,6 +281,7 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
         if not raw_articles:
             RESEARCH_JOBS[job_id].update({"status": "error", "error": "No articles found for this topic. Try rephrasing it."})
             return
+        _set_stat("found", len(raw_articles))
         update(f"✅ Found {len(raw_articles)} candidate sources.")
 
         update("▶ PHASE 2: Ranking source credibility...")
@@ -283,6 +289,7 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
             filter_and_rank_articles, raw_articles, config.SEARCH_MAX_RESULTS
         )
         llm_calls += filter_calls
+        _set_stat("ranked", len(ranked_articles))
         update(f"✅ {len(ranked_articles)} high-quality sources selected.")
 
         update("▶ PHASE 3: Reading full articles...")
@@ -290,8 +297,11 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
         if scraped_count == 0:
             RESEARCH_JOBS[job_id].update({"status": "error", "error": "Could not read any sources. Please try again."})
             return
+        _set_stat("extracted", scraped_count)
         update(f"✅ Extracted content from {scraped_count} sources.")
 
+        num_sections = len(config.REPORT_MODES[mode]["sections"])
+        _set_stat("section_total", num_sections)
         update("▶ PHASE 4: Writing your report...")
         stats_dict = {
             "scraped_success": scraped_count,
@@ -299,17 +309,13 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
             "llm_ranking_success": llm_success,
         }
 
-        # Shared list so the thread callback can post per-section updates
-        # back to the polling endpoint without needing locks (GIL is enough
-        # here since we only ever append from the executor thread and read
-        # from the asyncio thread, and list.append is GIL-atomic).
-        _section_log: list = []
-
         def _on_section_done(section_title: str, done: int, total: int) -> None:
             msg = f"✍️ Writing ({done}/{total}): {section_title}…"
-            _section_log.append(msg)
             if job_id in RESEARCH_JOBS:
                 RESEARCH_JOBS[job_id]["message"] = msg
+                RESEARCH_JOBS[job_id]["phase_stats"]["section_done"] = done
+                RESEARCH_JOBS[job_id]["phase_stats"]["section_total"] = total
+                RESEARCH_JOBS[job_id]["phase_stats"]["section_title"] = section_title
 
         final_report, meta = await asyncio.to_thread(
             generate_report, optimized_topic, scraped_data, scraped_sources,
@@ -382,6 +388,16 @@ async def api_start_research(request: Request, payload: ResearchRequest):
         "created_at": time.time(),
         "result": None,
         "error": None,
+        # Accumulated phase stats — polled separately from the message string
+        # so fast-moving early phases aren't missed between 2-second polls.
+        "phase_stats": {
+            "found": None,
+            "ranked": None,
+            "extracted": None,
+            "section_done": 0,
+            "section_total": 0,
+            "section_title": None,
+        },
     }
     _spawn_background(run_research_job(job_id, clean_topic, mode, language, session_id))
 
@@ -405,6 +421,7 @@ async def api_research_status(job_id: str, request: Request):
         "message": job["message"],
         "result": job["result"],
         "error": job["error"],
+        "phase_stats": job.get("phase_stats", {}),
     }
 
 

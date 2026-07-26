@@ -734,16 +734,40 @@
         }
 
         function _updateStatFromMsg(msg) {
-            // Live stats panel
+            // Fallback: also parse message for stats in case phase_stats not yet set
             let m;
             if ((m = msg.match(/Found (\d+) candidate/i)))
-                document.getElementById('stat-found').textContent = m[1] + ' results';
+                _setStatCell('stat-found', m[1] + ' results');
             if ((m = msg.match(/(\d+) high.quality sources selected/i)))
-                document.getElementById('stat-ranked').textContent = m[1] + ' sources';
+                _setStatCell('stat-ranked', m[1] + ' sources');
             if ((m = msg.match(/Extracted content from (\d+)/i)))
-                document.getElementById('stat-extracted').textContent = m[1] + ' articles';
-            if ((m = msg.match(/Writing \(\d+\/\d+\):\s*(.+)/i))) {
-                document.getElementById('stat-section').textContent = m[1].replace(/…$/, '');
+                _setStatCell('stat-extracted', m[1] + ' articles');
+            if ((m = msg.match(/Writing \(\d+\/\d+\):\s*(.+)/i)))
+                _setStatCell('stat-section', m[1].replace(/…$/, ''));
+        }
+
+        function _setStatCell(id, val) {
+            const el = document.getElementById(id);
+            if (el && val != null) el.textContent = String(val);
+        }
+
+        function applyPhaseStats(ps) {
+            // Called every poll with the accumulated phase_stats object from server.
+            // This is the primary way stats update — message-regex is just a fallback.
+            if (!ps) return;
+            if (ps.found    != null) _setStatCell('stat-found',     ps.found + ' results');
+            if (ps.ranked   != null) _setStatCell('stat-ranked',    ps.ranked + ' sources');
+            if (ps.extracted != null) _setStatCell('stat-extracted', ps.extracted + ' articles');
+            if (ps.section_title) {
+                const label = ps.section_total
+                    ? `${ps.section_done}/${ps.section_total}: ${ps.section_title}`
+                    : ps.section_title;
+                _setStatCell('stat-section', label);
+            }
+            // Drive progress from section counts (more reliable than message regex)
+            if (ps.section_total > 0 && ps.section_done > 0) {
+                const t = 75 + Math.round((ps.section_done / ps.section_total) * 20);
+                if (t > progressTarget) progressTarget = t;
             }
         }
 
@@ -777,10 +801,14 @@
             _setProgressUI(0);
             clearInterval(progressTimer);
             progressTimer = setInterval(() => {
-                // Tick toward target at constant speed; never exceed it until
-                // a new phase message bumps the target higher.
-                if (progressValue < progressTarget) {
-                    progressValue = Math.min(progressTarget, progressValue + PROGRESS_TICK_STEP);
+                // Fast tick when behind the phase waypoint, slow trickle when
+                // at/past it so the bar never freezes waiting for next poll.
+                const softCap = Math.min(99, progressTarget + 6);
+                if (progressValue < softCap) {
+                    const step = progressValue < progressTarget
+                        ? PROGRESS_TICK_STEP   // 0.6% — normal speed toward waypoint
+                        : 0.07;                // 0.07% — slow trickle past waypoint
+                    progressValue = Math.min(softCap, progressValue + step);
                     _setProgressUI(progressValue);
                 }
             }, PROGRESS_TICK_MS);
@@ -864,6 +892,8 @@
                 }
 
                 const job = await res.json();
+                // Apply accumulated phase stats first (reliable, never missed)
+                applyPhaseStats(job.phase_stats);
                 if (job.message && job.message !== lastMessage) {
                     lastMessage = job.message;
                     setStep(job.message);
