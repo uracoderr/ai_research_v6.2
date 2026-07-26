@@ -58,3 +58,10 @@ Docstring in `_extract_json_array` had literal `\[` — invalid escape in Python
 - Language: Hinglish is passed as lowercase `"hinglish"` from the form; `_language_instruction` checks `"hinglish" in lang_lower` — case-insensitive, works correctly.
 - All 8 tools pull context via `report-content.innerText` (client side) OR `currentTopic` → server `load_context` (RAG/Debate). This is intentional — both paths are correct.
 - Supabase is optional; local disk is the default and works fine for Replit.
+
+## Tool-specific token / model decisions (tuned for reliability)
+- **Podcast**: quality model for Hindi/Hinglish (8B drifts to English in JSON), max_tokens=3500, input cap 12k, 60-line cap, 3 retries.
+- **Slides**: quality model always (8B truncates JSON array at 1-2 slides), max_tokens=2800, prompt asks for 10-12 slides with structured outline, slide cap 14.
+- **Humanizer**: quality model for non-English, max_tokens=2800, input cap 8k, retries=3.
+- **Hindi TTS**: `hi-IN-MadhurNeural` / `hi-IN-SwaraNeural` added as `"hindi"` accent in `config.TTS_VOICES`; frontend auto-selects this accent when `currentLanguage === 'hindi'`.
+- **Why quality model matters**: 8B (fast) model reliably fails at sustained non-English output AND long JSON arrays — always use quality for these two scenarios.
