@@ -30,6 +30,97 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _extract_json_array(raw: str) -> list:
+    """
+    Robustly extract the first complete JSON array from LLM output.
+
+    The naive approach — re.search(r"\[.*\]", raw, re.DOTALL) — is greedy:
+    when the model emits two separate arrays (or wraps one in markdown fences
+    and adds a comment line after it) the regex grabs from the first '[' to
+    the very last ']', producing a string that json.loads rejects with
+    "Extra data". This implementation uses bracket-counting so it stops at
+    the first balanced closing ']', ignoring anything that follows.
+    """
+    # Strip markdown code fences the model sometimes wraps output in
+    text = re.sub(r"```(?:json)?\s*", "", raw).strip()
+
+    # Fast path: the whole string is already valid JSON
+    try:
+        result = json.loads(text)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Bracket-counting walk to find the first complete [...] block
+    start = text.find("[")
+    if start == -1:
+        raise LLMError("No JSON array found in LLM response.")
+
+    depth = 0
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text[start:], start):
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start : i + 1])
+
+    raise LLMError("Could not find a complete JSON array in LLM response.")
+
+
+def _extract_json_object(raw: str) -> dict:
+    """Same bracket-counting approach but for a single JSON object {...}."""
+    text = re.sub(r"```(?:json)?\s*", "", raw).strip()
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    if start == -1:
+        raise LLMError("No JSON object found in LLM response.")
+
+    depth = 0
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text[start:], start):
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start : i + 1])
+
+    raise LLMError("Could not find a complete JSON object in LLM response.")
+
+
 def _language_instruction(language: str) -> str:
     lang_lower = (language or "english").lower()
     if "hinglish" in lang_lower:
@@ -338,10 +429,7 @@ Report:
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
             max_tokens=max_tokens, temperature=0.4, model="fast", retries=2,
         )
-        match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
-        if not match:
-            raise LLMError("No JSON array found in quiz response.")
-        questions = json.loads(match.group(0))
+        questions = _extract_json_array(raw)
 
         clean = []
         for i, q in enumerate(questions[:num_questions]):
@@ -385,10 +473,7 @@ Respond with STRICT JSON only, nothing else:
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
             max_tokens=300, temperature=0.3, model="fast", retries=2,
         )
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not match:
-            raise LLMError("No JSON object found in grading response.")
-        result = json.loads(match.group(0))
+        result = _extract_json_object(raw)
         raw_score = result.get("score", 0)
         score = max(0, min(10, int(raw_score))) if isinstance(raw_score, (int, float)) else 0
         feedback = str(result.get("feedback", "")).strip()[:500] or "Answer received."
@@ -427,10 +512,7 @@ Report:
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
             max_tokens=900, temperature=0.4, model="fast", retries=2,
         )
-        match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
-        if not match:
-            raise LLMError("No JSON array found in slides response.")
-        slides = json.loads(match.group(0))
+        slides = _extract_json_array(raw)
 
         clean = []
         for s in slides[:8]:
@@ -452,9 +534,12 @@ def humanize_report(report_text: str, language: str = "english") -> str:
     """
     Rewrites the report in a more natural, conversational style to reduce
     AI-detection markers, while preserving all facts and citations.
-    Uses the quality 70B model for better stylistic variety.
+    Uses the fast 8B model with a trimmed input so it stays well within the
+    80-second NVIDIA API timeout even on constrained hosting (Render free tier).
     """
     lang_instruction = _language_instruction(language)
+    # Cap input at 5000 chars (~750 words) — enough for the model to rewrite a
+    # meaningful chunk without risking a timeout on slow API days.
     prompt = f"""Rewrite the following AI-generated report to sound more natural, human, and
 conversational — as if a knowledgeable student wrote it themselves. Rules:
 - Keep every fact, statistic, and citation exactly as-is.
@@ -467,16 +552,16 @@ conversational — as if a knowledgeable student wrote it themselves. Rules:
 {lang_instruction}
 
 Report to rewrite:
-{report_text[:9000]}
+{report_text[:5000]}
 """
     try:
         return call_nvidia_api(
             prompt,
             system="You are an expert editor who makes AI-generated text sound naturally human while preserving all facts.",
-            max_tokens=2500,
+            max_tokens=1800,
             temperature=0.75,
-            model="quality",
-            retries=2,
+            model="fast",
+            retries=1,
         )
     except LLMError as e:
         logger.error("Humanizer failed: %s", e)
@@ -515,10 +600,7 @@ Report:
             model="fast",
             retries=2,
         )
-        match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
-        if not match:
-            raise LLMError("No JSON array found in flashcards response.")
-        cards = json.loads(match.group(0))
+        cards = _extract_json_array(raw)
         clean = []
         for c in cards[:num_cards]:
             q = str(c.get("question", "")).strip()[:300]

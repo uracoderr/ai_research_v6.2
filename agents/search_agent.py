@@ -52,14 +52,32 @@ def _generate_sub_queries(query: str) -> List[str]:
     )
     try:
         raw = call_nvidia_api(prompt, max_tokens=120, temperature=0.3, model="fast", retries=1)
-        match = re.search(r"\[.*\]", raw, re.DOTALL)
-        if match:
-            queries = json.loads(match.group(0))
-            if isinstance(queries, list):
-                # Keep only non-empty strings, cap at 3, prepend the original
-                sub = [str(q).strip() for q in queries if str(q).strip()][:3]
-                if sub:
-                    return sub
+        # Strip markdown fences and try bracket-counted extraction to avoid
+        # greedy-regex "Extra data" errors when the model emits extra lines.
+        text = re.sub(r"```(?:json)?\s*", "", raw).strip()
+        start = text.find("[")
+        if start != -1:
+            depth, in_str, esc = 0, False, False
+            for i, ch in enumerate(text[start:], start):
+                if esc:
+                    esc = False; continue
+                if ch == "\\" and in_str:
+                    esc = True; continue
+                if ch == '"':
+                    in_str = not in_str; continue
+                if in_str:
+                    continue
+                if ch == "[":
+                    depth += 1
+                elif ch == "]":
+                    depth -= 1
+                    if depth == 0:
+                        queries = json.loads(text[start:i + 1])
+                        if isinstance(queries, list):
+                            sub = [str(q).strip() for q in queries if str(q).strip()][:3]
+                            if sub:
+                                return sub
+                        break
     except Exception as e:
         logger.warning("Sub-query generation failed (%s); using fallback queries.", e)
 
