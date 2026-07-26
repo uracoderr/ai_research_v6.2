@@ -285,6 +285,14 @@
                     </div>
                 </div>
                 <p class="text-center text-[11px] text-slate-600 mt-5">Safe to switch tabs — results appear automatically.</p>
+                <!-- Shown only on error; hidden during normal loading -->
+                <div class="text-center mt-4">
+                    <button id="retry-research-btn"
+                            onclick="showNewResearchForm()"
+                            class="hidden bg-teal-600/20 hover:bg-teal-600/30 text-teal-400 border border-teal-500/30 text-xs font-bold px-5 py-2 rounded-xl transition neon-teal">
+                        ↩ Try Again
+                    </button>
+                </div>
             </div>
 
             <!-- ══ RESULT ══ -->
@@ -309,7 +317,7 @@
                         <!-- Upgrade 2: Export PDF with watermark -->
                         <button onclick="exportPDF()" class="bg-teal-600/20 text-teal-400 hover:bg-teal-600/30 border border-teal-500/30 text-xs px-3 py-2 rounded-lg font-medium transition neon-teal">📄 Export PDF</button>
                         <!-- Upgrade 2: Share Link -->
-                        <button onclick="shareReport()" class="bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs px-3 py-2 rounded-lg font-medium transition neon-purple" title="Copy shareable message">🔗 Share</button>
+                        <button onclick="shareReport(this)" class="bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs px-3 py-2 rounded-lg font-medium transition neon-purple" title="Copy shareable message">🔗 Share</button>
                     </div>
                 </div>
 
@@ -594,7 +602,12 @@
 
         function changeZoom(val) {
             document.getElementById('zoom-val').innerText = val;
-            document.getElementById('report-content').style.fontSize = val + '%';
+            // Use px scaled from 15px base — setting "100%" would mean 100% of
+            // the *parent's* inherited font-size (typically 16px), not 100% of
+            // the element's own 15px baseline, producing a subtle but wrong jump.
+            const basePx = 15;
+            document.getElementById('report-content').style.fontSize =
+                (basePx * val / 100).toFixed(1) + 'px';
         }
 
         function renderMetrics(m) {
@@ -679,10 +692,17 @@
             if (uploadInput) uploadInput.value = '';
             const uploadStatus = document.getElementById('upload-status');
             if (uploadStatus) uploadStatus.innerHTML = '';
+            // Reset error-state UI: hide the Try Again button and restore
+            // the orbiting spinner so the next run starts from a clean state.
+            const retryBtn = document.getElementById('retry-research-btn');
+            if (retryBtn) retryBtn.classList.add('hidden');
+            const spinner = document.querySelector('#terminal-container .orbit-dot')?.closest('.relative');
+            if (spinner) spinner.style.display = '';
         }
 
         // ── Loading stepper ───────────────────────────────────────────────────
         let progressTimer = null;
+        let _stepTimeout  = null;   // debounce handle for setStep cross-fade
         let progressValue  = 0;
         let progressTarget = 0;   // phase waypoint we're ticking toward
         const PROGRESS_TICK_MS  = 400;   // how often we tick
@@ -780,9 +800,13 @@
             if (phaseEl) phaseEl.textContent = friendly.replace(/^[^\s]+\s/, '').replace(/…$/, '');
             const el = document.getElementById('status-text');
             if (!el) return;
+            // Cancel any pending cross-fade so rapid back-to-back setStep calls
+            // don't stack timeouts and produce a flash of stale text at 300 ms.
+            if (_stepTimeout) { clearTimeout(_stepTimeout); _stepTimeout = null; }
             el.classList.remove('step-in');
             el.classList.add('step-out');
-            setTimeout(() => {
+            _stepTimeout = setTimeout(() => {
+                _stepTimeout = null;
                 el.textContent = friendly;
                 el.classList.remove('step-out');
                 el.classList.add('step-in');
@@ -934,6 +958,12 @@
                 if (job.status === 'error') {
                     stopFakeProgress();
                     setStep('❌ ' + (job.error || 'Something went wrong — please try again.'));
+                    // Hide the orbiting spinner and show a "Try Again" button so
+                    // the user has a clear path back instead of a frozen screen.
+                    const spinner = document.querySelector('#terminal-container .orbit-dot')?.closest('.relative');
+                    if (spinner) spinner.style.display = 'none';
+                    const retryBtn = document.getElementById('retry-research-btn');
+                    if (retryBtn) retryBtn.classList.remove('hidden');
                     return;
                 }
             }
@@ -989,11 +1019,12 @@
         }
 
         // ── Upgrade 2: Share Link ─────────────────────────────────────────────
-        function shareReport() {
+        // Accepts the button element explicitly — relying on the deprecated
+        // window.event global fails in Firefox and strict-mode environments.
+        function shareReport(btn) {
             const topic = document.getElementById('res-topic').innerText || 'this topic';
             const shareText = `🎓 AI Research Report: "${topic}"\n\nGenerated instantly via ThesisPilot — Learn AI With Ahmed.\n\n🚀 Try it free: ${window.location.origin}`;
             navigator.clipboard.writeText(shareText).then(() => {
-                const btn = event.target;
                 const orig = btn.innerText;
                 btn.innerText = '✅ Copied!';
                 setTimeout(() => { btn.innerText = orig; }, 2000);
@@ -1135,8 +1166,12 @@
                 const color = kind === 'male' ? 'text-teal-400' : 'text-emerald-400';
                 box.innerHTML = `<strong class="${color}">${escapeHtml(line.speaker)}:</strong> <span class="text-white">${escapeHtml(line.text)}</span>`;
 
+                // Prefetch current + next TWO segments so the audio queue is
+                // always warm — prefetching only one ahead could still cause an
+                // audible gap on high-latency connections between Host A/B lines.
+                if (!prefetchCache[i])     prefetchCache[i]     = fetchAudioSegment(i);
                 if (i + 1 < scriptArr.length && !prefetchCache[i + 1]) prefetchCache[i + 1] = fetchAudioSegment(i + 1);
-                if (!prefetchCache[i]) prefetchCache[i] = fetchAudioSegment(i);
+                if (i + 2 < scriptArr.length && !prefetchCache[i + 2]) prefetchCache[i + 2] = fetchAudioSegment(i + 2);
                 const result = await prefetchCache[i];
                 delete prefetchCache[i];
 
@@ -1188,14 +1223,21 @@
         // ── RAG & Challenge ───────────────────────────────────────────────────
         let vivaCount = 0;
 
+        // Counter per chat-box so rapid sends never produce duplicate element IDs.
+        const _chatSeq = {};
         async function handleChat(endpoint, inputId, boxId, userColor, aiColor, onSuccess) {
             const input = document.getElementById(inputId);
             const box = document.getElementById(boxId);
             const query = input.value.trim();
             if (!query) return;
             input.value = "";
+            // Unique ID prevents ID collision when the user sends a second
+            // message before the first response arrives, which previously left
+            // a dangling "Thinking..." bubble that could never be removed.
+            _chatSeq[boxId] = (_chatSeq[boxId] || 0) + 1;
+            const typingId = `typing-${boxId}-${_chatSeq[boxId]}`;
             box.innerHTML += `<div class="${userColor} text-right bg-slate-800 p-1.5 rounded ml-6 text-xs">${escapeHtml(query)}</div>`;
-            box.innerHTML += `<div id="typing-${boxId}" class="${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 text-xs">Thinking...</div>`;
+            box.innerHTML += `<div id="${typingId}" class="${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 text-xs">Thinking...</div>`;
             box.scrollTop = box.scrollHeight;
 
             try {
@@ -1203,15 +1245,16 @@
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({safe_topic: currentTopic, query: query, language: currentLanguage})
                 });
-                const typingEl = document.getElementById(`typing-${boxId}`);
+                const typingEl = document.getElementById(typingId);
                 if (!res) { if (typingEl) typingEl.remove(); return; }
                 const data = await res.json();
                 if (typingEl) typingEl.remove();
-                box.innerHTML += `<div class="${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 markdown-body text-xs" style="font-size:0.75rem">${data.answer || escapeHtml(data.error || 'Something went wrong.')}</div>`;
+                const answer = data.answer || escapeHtml(data.error || 'Something went wrong.');
+                box.innerHTML += `<div class="${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 markdown-body text-xs" style="font-size:0.75rem">${answer}</div>`;
                 if (onSuccess) onSuccess(data);
             } catch (e) {
-                const typingEl = document.getElementById(`typing-${boxId}`);
-                if (typingEl) typingEl.innerText = "Error contacting API.";
+                const typingEl = document.getElementById(typingId);
+                if (typingEl) typingEl.innerText = "Error contacting the AI — please try again.";
             }
             box.scrollTop = box.scrollHeight;
         }

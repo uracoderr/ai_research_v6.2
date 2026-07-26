@@ -34,7 +34,7 @@ def _extract_json_array(raw: str) -> list:
     """
     Robustly extract the first complete JSON array from LLM output.
 
-    The naive approach — re.search(r"\[.*\]", raw, re.DOTALL) — is greedy:
+    The naive approach — re.search(r"\\[.*\\]", raw, re.DOTALL) — is greedy:
     when the model emits two separate arrays (or wraps one in markdown fences
     and adds a comment line after it) the regex grabs from the first '[' to
     the very last ']', producing a string that json.loads rejects with
@@ -259,7 +259,10 @@ def generate_report(
     results = {}
     total_sections = len(sections)
     done_count = 0
-    with ThreadPoolExecutor(max_workers=len(sections)) as executor:
+    # Cap at 3 concurrent LLM calls — more than this saturates the NVIDIA
+    # rate-limit window and burns memory on 0.1 vCPU / 512 MB hosts without
+    # meaningfully reducing wall-clock time (each call blocks on network I/O).
+    with ThreadPoolExecutor(max_workers=min(3, len(sections))) as executor:
         futures = {
             executor.submit(_generate_section, section, topic, scraped_text, language): section
             for section in sections
@@ -325,10 +328,11 @@ def generate_podcast_script(report_text: str, language: str = "english") -> List
     )
     try:
         raw = call_nvidia_api(prompt, max_tokens=1500, temperature=0.3, model="fast", retries=2)
-        match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
-        if not match:
-            raise LLMError("No JSON array found in podcast response.")
-        script = json.loads(match.group(0))
+        # Use the same bracket-counting parser as all other tools — the old
+        # greedy regex (r"\[\s*\{.*\}\s*\]", re.DOTALL) would capture from the
+        # first "[" to the very last "]", producing invalid JSON whenever the
+        # model emitted two arrays or trailing commentary.
+        script = _extract_json_array(raw)
         clean = []
         for line in script[:40]:
             if not isinstance(line, dict):

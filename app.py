@@ -362,8 +362,24 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
 
     except Exception as e:
         logger.error("Pipeline error (job=%s): %s\n%s", job_id, e, traceback.format_exc())
+        # Never expose raw exception text to the client — it may leak internal
+        # paths, model names, or stack details. Map known transient failure
+        # types to friendly messages; everything else gets a generic fallback.
+        err_str = str(e)
+        if "timeout" in err_str.lower() or "timed out" in err_str.lower():
+            friendly_error = "Research took too long — the AI model timed out. Try a narrower topic or Flash mode."
+        elif "rate" in err_str.lower() or "429" in err_str:
+            friendly_error = "The AI model is busy right now. Please wait a moment and try again."
+        elif "NVIDIA_API_KEY" in err_str or "TAVILY_API_KEY" in err_str:
+            friendly_error = "A required API key is not configured. Please contact the administrator."
+        elif "No articles found" in err_str:
+            friendly_error = err_str  # already a user-facing message
+        elif "Could not read any sources" in err_str:
+            friendly_error = err_str  # already a user-facing message
+        else:
+            friendly_error = "Something went wrong during research. Please try a different topic or try again shortly."
         if job_id in RESEARCH_JOBS:
-            RESEARCH_JOBS[job_id].update({"status": "error", "error": str(e)})
+            RESEARCH_JOBS[job_id].update({"status": "error", "error": friendly_error})
 
 
 @app.post("/api/research/start", dependencies=[Depends(require_access_key)])

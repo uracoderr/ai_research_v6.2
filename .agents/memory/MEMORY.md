@@ -1,0 +1,1 @@
+- [ThesisPilot QA fixes](thesispilot-qa.md) — key bugs fixed and arch decisions for this project

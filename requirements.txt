@@ -1,29 +1,21 @@
-# Core
+# Core web framework
 fastapi==0.110.0
 uvicorn==0.28.0
 jinja2==3.1.3
 python-multipart==0.0.9
+pydantic>=2.0.0
+
+# HTTP / scraping / parsing
 requests==2.31.0
 beautifulsoup4==4.12.3
 markdown==3.5.2
-pydantic>=2.0.0
 
 # Utilities
 python-dotenv>=1.0.0     # loads .env locally so you don't have to `export` keys by hand
 itsdangerous>=2.1.0      # signs the anonymous per-browser session cookie (utils/session.py)
 pypdf>=4.0.0             # extracts text from uploaded PDFs (app.py /api/upload-report)
 edge-tts>=6.1.0          # free, natural-sounding podcast voices via Microsoft Edge (no API key needed)
-beautifulsoup4==4.12.3
-edge-tts>=6.1.0
-fastapi==0.110.0
-itsdangerous>=2.1.0
-jinja2==3.1.3
-markdown==3.5.2
-pydantic>=2.0.0
-pypdf
-python-dotenv
-python-multipart==0.0.9
-requests==2.31.0
-slowapi
-tavily-python
-uvicorn==0.28.0
+slowapi>=0.1.9           # rate limiting middleware
+
+# Optional / CLI
+tavily-python            # Tavily Python SDK (used indirectly; direct requests used in search_agent)
