@@ -16,6 +16,7 @@ itsdangerous>=2.1.0      # signs the anonymous per-browser session cookie (utils
 pypdf>=4.0.0             # extracts text from uploaded PDFs (app.py /api/upload-report)
 edge-tts>=6.1.0          # free, natural-sounding podcast voices via Microsoft Edge (no API key needed)
 slowapi>=0.1.9           # rate limiting middleware
+gunicorn>=22.0.0         # production WSGI/ASGI server for deployments
 
 # Optional / CLI
 tavily-python            # Tavily Python SDK (used indirectly; direct requests used in search_agent)
