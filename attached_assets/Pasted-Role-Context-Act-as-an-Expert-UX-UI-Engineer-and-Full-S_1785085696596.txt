@@ -1,0 +1,22 @@
+Role & Context: > Act as an Expert UX/UI Engineer and Full-Stack Developer. I want to upgrade my existing 'ThesisPilot' web application into a premium, top-tier SaaS product. The app runs on a highly constrained Render Free Tier (0.1 vCPU, 512MB RAM), so all upgrades must be extremely lightweight and memory-efficient. Do not break the existing NVIDIA and Tavily API pipelines.
+​Implement the following 5 Major Product Upgrades:
+​1. 'Live Thinking' Terminal UI (Trust & Labor Illusion):
+​Replace the static "Loading" spinner during Phase 1 (Search & Generation) with a dynamic, real-time terminal UI.
+​Display simulated or real-time status steps to keep the user engaged (e.g., [0.0s] 🔍 Tavily is deep-crawling academic sources..., [2.5s] 🧠 NVIDIA AI is synthesizing 4,000 words..., [4.8s] ⚙️ Generating interactive tools...).
+​2. Viral Loop & Shareability (Export System):
+​Add beautiful "Export to PDF" and "Share Link" buttons below the generated reports, Mindmaps, and Flashcards.
+​Watermark Requirement: Every exported PDF or shared layout must automatically include a sleek, professional watermark at the bottom: "🚀 Generated instantly via ThesisPilot - Learn AI With Ahmed." >
+3. Gamification & Progression System:
+​Inject gamified elements into the 'Smart Quiz' and 'AI Debate' tools.
+​Implement a local score tracker. When a user wins a debate or scores 100% on a quiz, trigger a lightweight confetti animation (using canvas-confetti or similar).
+​Display a dynamic badge (e.g., "Subject Expert 🏆") to give the user a psychological dopamine hit and encourage retention.
+​4. Lightweight Smart Caching (Server Optimization):
+​Since we are on a 0.1 vCPU server, we cannot afford to hit the NVIDIA/Tavily APIs repeatedly for the same exact queries.
+​Implement a simple, lightweight In-Memory Cache (or simple JSON-based file cache/local storage logic if running statelessly).
+​If User B searches for the exact same topic as User A, immediately serve the cached Report and Tools without making external API calls. This ensures instant load times and saves API credits.
+​5. Premium UI/UX & Micro-interactions:
+​Upgrade the overall visual fidelity of the app to look like a premium $20/month SaaS.
+​Integrate framer-motion (or standard CSS transitions) for smooth mounting of components.
+​Apply a modern 'Glassmorphism' effect to the 8 tool cards (translucent dark backgrounds, subtle borders, backdrop blur).
+​Add neon hover effects (subtle Cyan/Green glows) when the user interacts with buttons and tool cards to make the interface feel alive.
+​Action: Execute these upgrades sequentially. Ensure the caching system does not cause memory leaks on the free tier. Run a final simulated test to confirm the UI feels snappy and the viral watermark is functioning correctly.

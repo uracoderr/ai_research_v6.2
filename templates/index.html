@@ -6,8 +6,11 @@
     <title>ThesisPilot - AI Research Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
     <style>
         body { word-break: break-word; overflow-wrap: break-word; }
+
+        /* ── Markdown body ── */
         .markdown-body h1 { font-size: 1.5rem; font-weight: 800; color: #f8fafc; border-bottom: 2px solid #334155; padding-bottom: 0.5rem; margin-bottom: 1.25rem;}
         .markdown-body h2 { font-size: 1.2rem; font-weight: 700; color: #38bdf8; margin-top: 1.75rem; margin-bottom: 0.75rem; border-left: 4px solid #6366f1; padding-left: 10px;}
         .markdown-body h3 { font-size: 1.05rem; font-weight: 600; color: #cbd5e1; margin-top: 1.25rem; margin-bottom: 0.5rem; }
@@ -36,11 +39,72 @@
             background-size: 200% 100%;
             animation: shimmer 2s infinite linear;
         }
+
+        /* ── Upgrade 1: Terminal cursor blink ── */
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        .terminal-cursor { display:inline-block; width:7px; height:13px; background:#00ff88; animation:blink 1s infinite; vertical-align:middle; margin-left:3px; border-radius:1px; }
+
+        /* ── Upgrade 5: Glassmorphism tool cards ── */
+        .glass-card {
+            background: rgba(255,255,255,0.04);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.08);
+            transition: all 0.25s ease;
+        }
+        .glass-card:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.15);
+            transform: translateY(-1px);
+        }
+
+        /* ── Upgrade 5: Neon glow effects ── */
+        .neon-teal:hover  { box-shadow: 0 0 16px rgba(20,184,166,0.35),  0 0 4px rgba(20,184,166,0.2);  }
+        .neon-cyan:hover  { box-shadow: 0 0 16px rgba(6,182,212,0.35),   0 0 4px rgba(6,182,212,0.2);   }
+        .neon-emerald:hover { box-shadow: 0 0 16px rgba(16,185,129,0.35), 0 0 4px rgba(16,185,129,0.2); }
+        .neon-amber:hover { box-shadow: 0 0 16px rgba(245,158,11,0.30),  0 0 4px rgba(245,158,11,0.15); }
+        .neon-red:hover   { box-shadow: 0 0 16px rgba(239,68,68,0.30),   0 0 4px rgba(239,68,68,0.15);  }
+        .neon-blue:hover  { box-shadow: 0 0 16px rgba(59,130,246,0.30),  0 0 4px rgba(59,130,246,0.15); }
+        .neon-purple:hover{ box-shadow: 0 0 16px rgba(168,85,247,0.30),  0 0 4px rgba(168,85,247,0.15); }
+        .neon-rose:hover  { box-shadow: 0 0 16px rgba(244,63,94,0.30),   0 0 4px rgba(244,63,94,0.15);  }
+        .neon-violet:hover{ box-shadow: 0 0 16px rgba(139,92,246,0.30),  0 0 4px rgba(139,92,246,0.15); }
+
+        /* ── Upgrade 5: Smooth component entrance ── */
+        @keyframes fadeInUp {
+            from { opacity:0; transform: translateY(18px); }
+            to   { opacity:1; transform: translateY(0); }
+        }
+        .fade-in-up { animation: fadeInUp 0.45s ease both; }
+
+        /* ── Upgrade 2: PDF Watermark (print only) ── */
+        .print-watermark { display: none; }
+        @media print {
+            .no-print { display: none !important; }
+            #sidebar  { display: none !important; }
+            .print-watermark {
+                display: block !important;
+                text-align: center;
+                font-size: 11px;
+                color: #64748b;
+                padding: 12px 0 4px;
+                border-top: 1px solid #e2e8f0;
+                margin-top: 32px;
+            }
+            #report-content { max-height: none !important; overflow: visible !important; }
+        }
+
+        /* ── Upgrade 3: Badge animation ── */
+        @keyframes badgePop {
+            0%   { transform: scale(0.4); opacity:0; }
+            70%  { transform: scale(1.12); }
+            100% { transform: scale(1);   opacity:1; }
+        }
+        .badge-pop { animation: badgePop 0.55s cubic-bezier(.36,.07,.19,.97) both; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex selection:bg-teal-500 selection:text-white relative overflow-x-hidden">
 
-    <!-- Optional access-key gate: hidden unless the server reports access_required=true (SAAS_ACCESS_KEY set) -->
+    <!-- Optional access-key gate -->
     <div id="access-gate" class="hidden fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
         <form onsubmit="submitAccessKey(event)" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
             <h3 class="text-lg font-bold text-white">🔑 Access Code Required</h3>
@@ -60,11 +124,11 @@
                 <h1 class="text-base font-extrabold bg-gradient-to-r from-emerald-400 to-cyan-500 bg-clip-text text-transparent">ThesisPilot</h1>
             </div>
             <button onclick="toggleSidebar()" class="md:hidden text-slate-400 hover:text-white p-1">✖</button>
-            <span class="hidden md:inline-block text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">V6.0</span>
+            <span class="hidden md:inline-block text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">V7.0</span>
         </div>
 
         <div class="p-3">
-            <button onclick="showNewResearchForm()" class="w-full bg-teal-600/20 hover:bg-teal-600/30 text-teal-400 border border-teal-500/30 text-xs font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2">
+            <button onclick="showNewResearchForm()" class="w-full bg-teal-600/20 hover:bg-teal-600/30 text-teal-400 border border-teal-500/30 text-xs font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2 neon-teal">
                 <span>➕</span> New Research
             </button>
         </div>
@@ -79,7 +143,7 @@
 
     <div class="flex-1 flex flex-col h-screen overflow-y-auto w-full">
 
-        <div class="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
+        <div class="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-30 no-print">
             <div class="flex items-center gap-2">
                 <span class="text-xl">🎓</span>
                 <h1 class="text-base font-extrabold bg-gradient-to-r from-emerald-400 to-cyan-500 bg-clip-text text-transparent">ThesisPilot</h1>
@@ -91,7 +155,8 @@
 
         <main class="max-w-5xl mx-auto w-full px-4 md:px-6 py-6 flex-grow flex flex-col">
 
-            <div id="form-container" class="max-w-xl mx-auto w-full space-y-6 mt-4 md:mt-10">
+            <!-- ══ FORM ══ -->
+            <div id="form-container" class="max-w-xl mx-auto w-full space-y-6 mt-4 md:mt-10 fade-in-up">
                 <div class="text-center space-y-1">
                     <h2 class="text-2xl md:text-3xl font-extrabold">Assignment Helper</h2>
                     <p class="text-xs text-slate-500">Complete your assignment in 10 minutes.</p>
@@ -118,7 +183,7 @@
                             </select>
                         </div>
                     </div>
-                    <button type="submit" class="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-xl transition text-white shadow-lg shadow-teal-900/50">Run Deep Synthesis</button>
+                    <button type="submit" class="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-xl transition text-white shadow-lg shadow-teal-900/50 neon-teal">Run Deep Synthesis</button>
                 </form>
 
                 <div class="flex items-center gap-3">
@@ -140,21 +205,48 @@
                 </div>
             </div>
 
-            <div id="terminal-container" class="hidden max-w-xl mx-auto w-full py-10 space-y-4">
-                <h3 class="text-center font-bold text-slate-300">Pipeline Executing...</h3>
-                <p id="status-text" class="text-center text-xs text-teal-400 font-mono">Initializing agents...</p>
-                <div class="w-full bg-slate-900 rounded-full h-3 p-0.5 border border-slate-800">
-                    <div id="progress-bar" class="progress-shimmer h-2 rounded-full transition-all duration-500" style="width:5%"></div>
+            <!-- ══ UPGRADE 1: Live Thinking Terminal ══ -->
+            <div id="terminal-container" class="hidden max-w-2xl mx-auto w-full py-8 space-y-4 fade-in-up">
+                <!-- Terminal window chrome -->
+                <div class="rounded-2xl overflow-hidden border border-slate-700/60 shadow-2xl shadow-black/60">
+                    <!-- Title bar -->
+                    <div class="bg-slate-800 px-4 py-3 flex items-center gap-2 border-b border-slate-700/60">
+                        <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+                        <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
+                        <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
+                        <span class="ml-3 text-[11px] text-slate-400 font-mono flex-1 text-center">thesispilot — research-agent — bash</span>
+                        <span id="terminal-elapsed" class="text-[10px] text-slate-500 font-mono">0.0s</span>
+                    </div>
+                    <!-- Terminal body -->
+                    <div class="bg-[#0a0f1a] p-4 space-y-3">
+                        <!-- Status line -->
+                        <div class="flex items-center gap-2">
+                            <span class="text-emerald-400 font-mono text-xs">$</span>
+                            <p id="status-text" class="text-xs text-teal-300 font-mono flex-1">Initializing agents...</p>
+                            <span class="terminal-cursor"></span>
+                        </div>
+                        <!-- Progress bar -->
+                        <div class="w-full bg-slate-900 rounded-full h-2.5 border border-slate-700/50 overflow-hidden">
+                            <div id="progress-bar" class="progress-shimmer h-full rounded-full transition-all duration-500" style="width:2%"></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+                            <span>pipeline progress</span>
+                            <span id="progress-pct">2%</span>
+                        </div>
+                        <!-- Log output -->
+                        <div id="logs" class="bg-black/60 text-[11px] text-emerald-300 p-3 rounded-xl h-44 overflow-y-auto border border-slate-800 whitespace-pre-wrap font-mono leading-relaxed"></div>
+                    </div>
                 </div>
-                <div class="flex justify-between text-xs text-slate-400 font-mono">
-                    <span>Progress</span>
-                    <span id="progress-pct">5%</span>
-                </div>
-                <div id="logs" class="bg-black text-[10px] text-emerald-400 p-4 rounded-xl h-40 overflow-y-auto border border-slate-800 whitespace-pre-wrap font-mono"></div>
+                <p class="text-center text-[10px] text-slate-600 font-mono">Research runs on the server — safe to switch tabs. Results auto-appear when ready.</p>
             </div>
 
-            <div id="result-container" class="hidden w-full space-y-6">
-                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-wrap gap-4 items-center justify-between">
+            <!-- ══ RESULT ══ -->
+            <div id="result-container" class="hidden w-full space-y-6 fade-in-up">
+
+                <!-- ── Upgrade 2: PDF Watermark (invisible until print) ── -->
+                <div class="print-watermark">🚀 Generated instantly via ThesisPilot — Learn AI With Ahmed.</div>
+
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-wrap gap-4 items-center justify-between no-print">
                     <div class="space-y-1.5">
                         <span class="text-[10px] text-slate-500 uppercase font-bold">Active Topic</span>
                         <h3 id="res-topic" class="text-sm md:text-base font-bold text-white capitalize"></h3>
@@ -165,71 +257,96 @@
                         <input type="range" min="50" max="150" value="100" step="5" oninput="changeZoom(this.value)" class="w-20 accent-teal-500 cursor-pointer">
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <a id="download-md" href="#" download class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-2 rounded-lg font-medium transition border border-slate-700 text-slate-300">.md</a>
+                        <a id="download-md"   href="#" download class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-2 rounded-lg font-medium transition border border-slate-700 text-slate-300">.md</a>
                         <a id="download-html" href="#" download class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-2 rounded-lg font-medium transition border border-slate-700 text-slate-300">.html</a>
-                        <button onclick="window.print()" class="bg-teal-600/20 text-teal-400 hover:bg-teal-600/30 border border-teal-500/30 text-xs px-3 py-2 rounded-lg font-medium transition">PDF</button>
+                        <!-- Upgrade 2: Export PDF with watermark -->
+                        <button onclick="exportPDF()" class="bg-teal-600/20 text-teal-400 hover:bg-teal-600/30 border border-teal-500/30 text-xs px-3 py-2 rounded-lg font-medium transition neon-teal">📄 Export PDF</button>
+                        <!-- Upgrade 2: Share Link -->
+                        <button onclick="shareReport()" class="bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs px-3 py-2 rounded-lg font-medium transition neon-purple" title="Copy shareable message">🔗 Share</button>
                     </div>
                 </div>
 
-                <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 space-y-2.5">
+                <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 space-y-2.5 no-print">
                     <span class="text-emerald-400 font-bold text-sm">✅ Assignment Ready</span>
                     <p class="text-[11px] text-slate-400">Next step — pick one:</p>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        <button onclick="openTab('slides-tab'); startSlidesMode(); scrollToTools();" class="bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold py-2 px-1 rounded-lg transition">📊 Generate PPT</button>
-                        <button onclick="openTab('podcast-tab'); startPodcastMode(); scrollToTools();" class="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 text-[11px] font-bold py-2 px-1 rounded-lg transition">🎙️ Listen as Podcast</button>
-                        <button onclick="openTab('challenge-tab'); scrollToTools();" class="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 text-[11px] font-bold py-2 px-1 rounded-lg transition">⚔️ Practice Viva</button>
-                        <button onclick="openTab('mindmap-tab'); generateMindmap(); scrollToTools();" class="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-500 text-[11px] font-bold py-2 px-1 rounded-lg transition">🧠 Revise with Mindmap</button>
+                        <button onclick="openTab('slides-tab'); startSlidesMode(); scrollToTools();" class="bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold py-2 px-1 rounded-lg transition neon-purple">📊 Generate PPT</button>
+                        <button onclick="openTab('podcast-tab'); startPodcastMode(); scrollToTools();" class="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 text-[11px] font-bold py-2 px-1 rounded-lg transition neon-amber">🎙️ Listen as Podcast</button>
+                        <button onclick="openTab('challenge-tab'); scrollToTools();" class="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 text-[11px] font-bold py-2 px-1 rounded-lg transition neon-red">⚔️ Practice Viva</button>
+                        <button onclick="openTab('mindmap-tab'); generateMindmap(); scrollToTools();" class="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-500 text-[11px] font-bold py-2 px-1 rounded-lg transition neon-cyan">🧠 Revise with Mindmap</button>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                     <div class="lg:col-span-2 bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-lg max-h-[600px] md:max-h-[750px] overflow-y-auto">
                         <div id="report-content" class="markdown-body transition-all duration-150" style="font-size: 15px;"></div>
+                        <!-- Watermark inside report for PDF -->
+                        <div class="print-watermark mt-6">🚀 Generated instantly via ThesisPilot — Learn AI With Ahmed.</div>
                     </div>
 
-                    <div class="lg:col-span-1 space-y-4 md:sticky top-6">
-                        <div id="tools-panel" class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <!-- ── Upgrade 5: Glassmorphism tool panel ── -->
+                    <div class="lg:col-span-1 space-y-4 md:sticky top-6 no-print">
+                        <div id="tools-panel" class="bg-slate-900/60 border border-slate-700/50 rounded-xl p-4 backdrop-blur-sm">
                             <h4 class="font-bold text-teal-400 mb-3 border-b border-slate-800 pb-2 text-sm">🎯 One Research → 8 Study Tools</h4>
                             <div class="grid grid-cols-2 lg:grid-cols-1 gap-2.5">
-                                <button onclick="openTab('podcast-tab'); startPodcastMode();" class="bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('podcast-tab'); startPodcastMode();"
+                                        class="glass-card bg-amber-500/8 text-amber-500 border-amber-500/20 p-2.5 rounded-xl text-left neon-amber">
                                     <div class="text-xs font-bold">🎙️ Podcast</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Listen on your commute or while walking</div>
                                 </button>
-                                <button onclick="openTab('mindmap-tab'); generateMindmap();" class="bg-cyan-500/10 text-cyan-500 hover:bg-cyan-500/20 border border-cyan-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('mindmap-tab'); generateMindmap();"
+                                        class="glass-card bg-cyan-500/8 text-cyan-500 border-cyan-500/20 p-2.5 rounded-xl text-left neon-cyan">
                                     <div class="text-xs font-bold">🧠 Mindmap</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Revise the whole topic in 2 minutes</div>
                                 </button>
-                                <button onclick="openTab('rag-tab')" class="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 border border-emerald-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('rag-tab')"
+                                        class="glass-card bg-emerald-500/8 text-emerald-500 border-emerald-500/20 p-2.5 rounded-xl text-left neon-emerald">
                                     <div class="text-xs font-bold">💬 AI Tutor</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Ask anything, straight from your report</div>
                                 </button>
-                                <button onclick="openTab('challenge-tab')" class="bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('challenge-tab')"
+                                        class="glass-card bg-red-500/8 text-red-500 border-red-500/20 p-2.5 rounded-xl text-left neon-red">
                                     <div class="text-xs font-bold">⚔️ Viva Mode</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Practice examiner-style questions</div>
                                 </button>
-                                <button onclick="openTab('quiz-tab')" class="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('quiz-tab')"
+                                        class="glass-card bg-blue-500/8 text-blue-400 border-blue-500/20 p-2.5 rounded-xl text-left neon-blue">
                                     <div class="text-xs font-bold">📝 Quiz</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Quick exam practice, auto-graded</div>
                                 </button>
-                                <button onclick="openTab('slides-tab'); startSlidesMode();" class="bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('slides-tab'); startSlidesMode();"
+                                        class="glass-card bg-purple-500/8 text-purple-400 border-purple-500/20 p-2.5 rounded-xl text-left neon-purple">
                                     <div class="text-xs font-bold">📊 PPT Generator</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Presentation slides, ready to go</div>
                                 </button>
-                                <button onclick="openTab('humanizer-tab'); startHumanizerMode();" class="bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('humanizer-tab'); startHumanizerMode();"
+                                        class="glass-card bg-rose-500/8 text-rose-400 border-rose-500/20 p-2.5 rounded-xl text-left neon-rose">
                                     <div class="text-xs font-bold">✍️ Humanizer</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Rewrite in natural, human style</div>
                                 </button>
-                                <button onclick="openTab('flashcards-tab'); startFlashcardsMode();" class="bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/30 p-2.5 rounded-lg text-left transition">
+
+                                <button onclick="openTab('flashcards-tab'); startFlashcardsMode();"
+                                        class="glass-card bg-violet-500/8 text-violet-400 border-violet-500/20 p-2.5 rounded-xl text-left neon-violet">
                                     <div class="text-xs font-bold">🗂️ Smart Flashcards</div>
                                     <div class="text-[10px] font-normal opacity-70 mt-0.5">Q&A cards for active recall</div>
                                 </button>
                             </div>
                         </div>
 
-                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 h-[380px] flex flex-col overflow-hidden relative shadow-inner">
+                        <!-- Tool content area -->
+                        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 h-[420px] flex flex-col overflow-hidden relative shadow-inner">
                             <div id="empty-tab" class="tab-content active h-full justify-center items-center text-center text-slate-500 text-xs">
                                 Select a tool above to interact with the research data.
                             </div>
+
+                            <!-- Podcast -->
                             <div id="podcast-tab" class="tab-content h-full flex-col space-y-2">
                                 <div class="flex justify-between items-center border-b border-slate-800 pb-2">
                                     <h5 class="font-bold text-amber-500 text-xs">🔴 Live AI Script</h5>
@@ -248,40 +365,67 @@
                                 </div>
                                 <div id="podcast-box" class="text-xs text-slate-300 leading-relaxed italic overflow-y-auto flex-grow">Generating script...</div>
                             </div>
+
+                            <!-- Mindmap -->
                             <div id="mindmap-tab" class="tab-content h-full flex-col">
-                                <h5 class="font-bold text-cyan-500 text-xs mb-2 border-b border-slate-800 pb-2">Architectural Mindmap</h5>
+                                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                                    <h5 class="font-bold text-cyan-500 text-xs">Architectural Mindmap</h5>
+                                    <button onclick="exportMindmap()" class="text-[10px] bg-cyan-600/20 text-cyan-300 px-2 py-0.5 rounded hover:bg-cyan-600/30 transition">📄 Export</button>
+                                </div>
                                 <div id="mindmap-box" class="text-xs text-slate-400 overflow-auto flex-grow">Drawing...</div>
                             </div>
+
+                            <!-- RAG -->
                             <div id="rag-tab" class="tab-content h-full flex-col">
                                 <h5 class="font-bold text-emerald-500 text-xs mb-2 border-b border-slate-800 pb-2">💬 Ask Your AI Tutor</h5>
                                 <div id="rag-chat" class="flex-grow overflow-y-auto space-y-2 mb-2 text-xs pr-1"></div>
                                 <div class="flex gap-2 mt-auto">
                                     <input type="text" id="rag-input" placeholder="Ask something..." class="flex-grow bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs outline-none">
-                                    <button onclick="sendRAG()" class="bg-emerald-600 px-3 rounded font-bold text-xs">Ask</button>
+                                    <button onclick="sendRAG()" class="bg-emerald-600 px-3 rounded font-bold text-xs neon-emerald">Ask</button>
                                 </div>
                             </div>
+
+                            <!-- Challenge / Viva -->
                             <div id="challenge-tab" class="tab-content h-full flex-col">
-                                <h5 class="font-bold text-red-500 text-xs mb-2 border-b border-slate-800 pb-2">⚔️ Practice Your Viva</h5>
+                                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                                    <h5 class="font-bold text-red-500 text-xs">⚔️ Practice Your Viva</h5>
+                                    <!-- Upgrade 3: Viva streak badge -->
+                                    <div id="viva-badge" class="hidden badge-pop bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] px-2 py-0.5 rounded-full">🏆 Debate Master</div>
+                                </div>
                                 <div id="challenge-chat" class="flex-grow overflow-y-auto space-y-2 mb-2 text-xs pr-1"></div>
                                 <div class="flex gap-2 mt-auto">
                                     <input type="text" id="challenge-input" placeholder="Explain a concept, get examiner-style feedback..." class="flex-grow bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs outline-none">
-                                    <button onclick="sendChallenge()" class="bg-red-600 px-3 rounded font-bold text-xs">Send</button>
+                                    <button onclick="sendChallenge()" class="bg-red-600 px-3 rounded font-bold text-xs neon-red">Send</button>
                                 </div>
                             </div>
+
+                            <!-- Quiz -->
                             <div id="quiz-tab" class="tab-content h-full flex-col">
                                 <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
                                     <h5 class="font-bold text-blue-400 text-xs">🎯 Test My Knowledge</h5>
-                                    <button onclick="resetQuizSetup()" class="text-[10px] bg-blue-600/20 text-blue-300 px-2 py-0.5 rounded">New Quiz</button>
+                                    <div class="flex items-center gap-2">
+                                        <!-- Upgrade 3: Score tracker -->
+                                        <span id="quiz-score-badge" class="hidden text-[10px] font-bold bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">0/0</span>
+                                        <button onclick="resetQuizSetup()" class="text-[10px] bg-blue-600/20 text-blue-300 px-2 py-0.5 rounded">New Quiz</button>
+                                    </div>
                                 </div>
                                 <div id="quiz-setup" class="flex flex-col items-center justify-center flex-grow text-center gap-3">
                                     <p class="text-xs text-slate-400">How many questions would you like?</p>
                                     <input type="number" id="quiz-count-input" min="1" max="20" value="5"
                                            class="w-20 text-center bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500">
                                     <p class="text-[10px] text-slate-500">Maximum 20 questions.</p>
-                                    <button onclick="startQuizMode()" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded text-xs font-bold">Generate Quiz</button>
+                                    <button onclick="startQuizMode()" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded text-xs font-bold neon-blue">Generate Quiz</button>
+                                </div>
+                                <!-- Upgrade 3: Achievement badge -->
+                                <div id="quiz-achievement" class="hidden flex-col items-center justify-center gap-1.5 py-3 border-t border-slate-800 mt-2">
+                                    <span id="quiz-badge-label" class="text-base badge-pop">🏆</span>
+                                    <span id="quiz-badge-text" class="text-[11px] text-yellow-400 font-bold"></span>
+                                    <span id="quiz-badge-sub" class="text-[10px] text-slate-500"></span>
                                 </div>
                                 <div id="quiz-box" class="hidden flex-grow overflow-y-auto space-y-2.5 text-xs pr-1"></div>
                             </div>
+
+                            <!-- Slides -->
                             <div id="slides-tab" class="tab-content h-full flex-col">
                                 <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
                                     <h5 class="font-bold text-purple-400 text-xs">📊 PPT Outline</h5>
@@ -294,6 +438,8 @@
                                     <button onclick="nextSlide()" class="text-[10px] bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded">Next ▶</button>
                                 </div>
                             </div>
+
+                            <!-- Humanizer -->
                             <div id="humanizer-tab" class="tab-content h-full flex-col">
                                 <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
                                     <h5 class="font-bold text-rose-400 text-xs">✍️ Humanized Report</h5>
@@ -301,6 +447,8 @@
                                 </div>
                                 <div id="humanizer-box" class="flex-grow overflow-y-auto text-xs text-slate-300 leading-relaxed">Generating human-style rewrite...</div>
                             </div>
+
+                            <!-- Flashcards -->
                             <div id="flashcards-tab" class="tab-content h-full flex-col">
                                 <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
                                     <h5 class="font-bold text-violet-400 text-xs">🗂️ Smart Flashcards</h5>
@@ -322,11 +470,9 @@
     <script>
         mermaid.initialize({ startOnLoad: false, theme: 'dark' });
         let currentTopic = "";
-        let currentLanguage = "english"; // tracks language of the currently loaded report
+        let currentLanguage = "english";
 
-        // ---------------------------------------------------------------
-        // Small helpers
-        // ---------------------------------------------------------------
+        // ── Helpers ──────────────────────────────────────────────────────────
         function escapeHtml(str) {
             const div = document.createElement('div');
             div.textContent = str ?? '';
@@ -337,18 +483,12 @@
             return localStorage.getItem('trp_access_key') || '';
         }
 
-        // Wraps fetch(): attaches the access key header if we have one, and
-        // pops the access-gate modal automatically on a 401 instead of every
-        // call site having to handle that case separately.
         async function apiFetch(url, options = {}) {
             const key = getAccessKey();
             options.headers = options.headers || {};
             if (key) options.headers['X-API-Key'] = key;
             const res = await fetch(url, options);
-            if (res.status === 401) {
-                showAccessGate();
-                return null;
-            }
+            if (res.status === 401) { showAccessGate(); return null; }
             return res;
         }
 
@@ -363,14 +503,11 @@
             hideAccessGate();
         }
 
-        // ---------------------------------------------------------------
-        // App bootstrap
-        // ---------------------------------------------------------------
+        // ── Bootstrap ─────────────────────────────────────────────────────────
         async function initApp() {
             try {
                 const res = await fetch('/api/meta');
                 const data = await res.json();
-
                 const modeSelect = document.getElementById('mode-input');
                 if (data.modes && data.modes.length) {
                     modeSelect.innerHTML = data.modes.map(m =>
@@ -378,16 +515,12 @@
                     ).join('');
                     modeSelect.title = data.modes.map(m => `${m.label}: ${m.description}`).join(' | ');
                 }
-
                 if (data.access_required && !getAccessKey()) showAccessGate();
-            } catch (e) {
-                console.error('Failed to load app meta', e);
-            }
+            } catch (e) { console.error('Failed to load app meta', e); }
             loadHistory();
         }
         window.addEventListener('DOMContentLoaded', initApp);
 
-        // UI Helpers
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             const overlay = document.getElementById('mobile-overlay');
@@ -407,9 +540,6 @@
             document.getElementById(tabId).classList.add('active');
         }
 
-        // The tools panel sits below the report content in the DOM on mobile
-        // (single-column layout), so a "Next Step" CTA click needs to also
-        // scroll it into view, not just switch tabs.
         function scrollToTools() {
             const panel = document.getElementById('tools-panel');
             if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -423,17 +553,19 @@
         function renderMetrics(m) {
             const el = document.getElementById('report-meta');
             if (!el) return;
+            const cached = m.from_cache ? `<span class="metric-badge">⚡ Cached</span>` : '';
             el.innerHTML = `
                 <span class="metric-badge">📝 ${m.word_count} words</span>
                 <span class="metric-badge">⏱ ${m.reading_minutes} min read</span>
                 <span class="metric-badge">✅ ${m.confidence_score}% confidence</span>
                 <span class="metric-badge">⚡ ${escapeHtml(m.mode_label)}</span>
                 <span class="metric-badge">⌛ ${m.time_seconds}s</span>
+                ${cached}
                 ${m.notice ? `<span class="metric-badge-warn">⚠️ ${escapeHtml(m.notice)}</span>` : ''}
             `;
         }
 
-        // History Management
+        // ── History ───────────────────────────────────────────────────────────
         async function loadHistory() {
             const hList = document.getElementById('history-list');
             try {
@@ -457,7 +589,6 @@
 
         async function loadPastReport(safeTopic) {
             closeMobileSidebar();
-
             document.getElementById('rag-chat').innerHTML = "";
             document.getElementById('challenge-chat').innerHTML = "";
             document.getElementById('report-meta').innerHTML = "";
@@ -468,7 +599,6 @@
 
             const resContainer = document.getElementById('result-container');
             const reportContent = document.getElementById('report-content');
-
             reportContent.innerHTML = "<p class='text-teal-400 font-mono text-sm animate-pulse'>Loading saved research...</p>";
             resContainer.classList.remove('hidden');
 
@@ -497,7 +627,6 @@
             document.getElementById('result-container').classList.add('hidden');
             document.getElementById('terminal-container').classList.add('hidden');
             document.getElementById('form-container').classList.remove('hidden');
-
             document.getElementById('topic-input').value = '';
             const uploadInput = document.getElementById('upload-input');
             if (uploadInput) uploadInput.value = '';
@@ -505,27 +634,22 @@
             if (uploadStatus) uploadStatus.innerHTML = '';
         }
 
-        // ---------------------------------------------------------------
-        // Deep Synthesis Pipeline
-        // ---------------------------------------------------------------
-        // Smooth progress bar: fills continuously and predictably regardless
-        // of how backend phase timing actually falls, decelerating as it
-        // approaches ~92% and holding there until the real report arrives -
-        // at which point finishFakeProgress() snaps it to 100% instantly, so
-        // "100%" and "the report is ready" always happen at the same moment.
+        // ── Upgrade 1: Live Thinking Terminal ────────────────────────────────
         let progressTimer = null;
         let progressValue = 0;
+        let researchStartTime = 0;
+        let elapsedTimer = null;
 
         function startFakeProgress() {
             const pBar = document.getElementById('progress-bar');
             const pPct = document.getElementById('progress-pct');
             progressValue = 0;
-            pBar.style.width = '0%';
-            pPct.innerText = '0%';
+            pBar.style.width = '2%';
+            pPct.innerText = '2%';
             clearInterval(progressTimer);
             progressTimer = setInterval(() => {
                 const remaining = 92 - progressValue;
-                const step = Math.max(0.15, remaining * 0.035);
+                const step = Math.max(0.1, remaining * 0.028);
                 progressValue = Math.min(92, progressValue + step);
                 pBar.style.width = progressValue.toFixed(1) + '%';
                 pPct.innerText = Math.round(progressValue) + '%';
@@ -534,12 +658,61 @@
 
         function finishFakeProgress() {
             clearInterval(progressTimer);
+            clearInterval(elapsedTimer);
             document.getElementById('progress-bar').style.width = '100%';
             document.getElementById('progress-pct').innerText = '100%';
         }
 
         function stopFakeProgress() {
             clearInterval(progressTimer);
+            clearInterval(elapsedTimer);
+        }
+
+        function startElapsedTimer() {
+            researchStartTime = Date.now();
+            clearInterval(elapsedTimer);
+            elapsedTimer = setInterval(() => {
+                const secs = ((Date.now() - researchStartTime) / 1000).toFixed(1);
+                const el = document.getElementById('terminal-elapsed');
+                if (el) el.innerText = secs + 's';
+            }, 250);
+        }
+
+        function getElapsed() {
+            return ((Date.now() - researchStartTime) / 1000).toFixed(1);
+        }
+
+        // Maps backend phase messages to terminal-style icons + friendly labels
+        const PHASE_ICONS = {
+            'PHASE 0': '🧭',
+            'PHASE 1': '🔍',
+            'PHASE 2': '⚖️',
+            'PHASE 3': '📄',
+            'PHASE 4': '✍️',
+            'Found':   '📦',
+            'selected':'✅',
+            'Extracted':'✅',
+            'refined': '✨',
+            'ready':   '🚀',
+            'Starting':'⚙️',
+        };
+
+        function terminalIcon(msg) {
+            for (const [key, icon] of Object.entries(PHASE_ICONS)) {
+                if (msg.includes(key)) return icon;
+            }
+            return '▸';
+        }
+
+        function appendLog(msg) {
+            const logs = document.getElementById('logs');
+            if (!logs) return;
+            const elapsed = getElapsed();
+            const icon = terminalIcon(msg);
+            const line = document.createElement('div');
+            line.innerHTML = `<span class="text-slate-600">[${elapsed}s]</span> <span class="text-emerald-400">${icon}</span> <span class="text-green-300">${escapeHtml(msg)}</span>`;
+            logs.appendChild(line);
+            logs.scrollTop = logs.scrollHeight;
         }
 
         async function startResearch(event) {
@@ -557,6 +730,10 @@
             const sText = document.getElementById('status-text');
             logs.innerHTML = "";
             startFakeProgress();
+            startElapsedTimer();
+
+            appendLog(`Booting ThesisPilot research pipeline...`);
+            appendLog(`Topic: "${topic}" | Mode: ${mode} | Lang: ${lang}`);
 
             try {
                 const res = await apiFetch('/api/research/start', {
@@ -565,43 +742,27 @@
                     body: JSON.stringify({ topic, language: lang, mode })
                 });
 
-                if (!res) { // apiFetch already popped the access-gate modal on 401
-                    stopFakeProgress();
-                    showNewResearchForm();
-                    return;
-                }
+                if (!res) { stopFakeProgress(); showNewResearchForm(); return; }
 
                 if (!res.ok) {
                     stopFakeProgress();
                     let message = `Request failed (${res.status})`;
-                    try {
-                        const errJson = await res.json();
-                        message = errJson.detail || errJson.error || message;
-                    } catch (_) { /* response wasn't JSON, keep default message */ }
+                    try { const errJson = await res.json(); message = errJson.detail || errJson.error || message; } catch (_) {}
                     sText.innerText = "❌ " + message;
-                    logs.innerHTML += `<div>❌ ${escapeHtml(message)}</div>`;
+                    appendLog("❌ " + message);
                     return;
                 }
 
                 const { job_id } = await res.json();
-                await pollResearchJob(job_id, logs, sText);
+                await pollResearchJob(job_id, sText);
             } catch (e) {
                 stopFakeProgress();
                 sText.innerText = "❌ Connection error.";
-                logs.innerHTML += `<div>❌ ${escapeHtml(e.message)}</div>`;
+                appendLog("❌ " + e.message);
             }
         }
 
-        // Polls the background job every couple of seconds instead of holding
-        // one long-lived connection open. The whole research pipeline (1-3+
-        // minutes) now runs entirely server-side, independent of this browser
-        // tab - if a poll fails (tab backgrounded/throttled, a brief network
-        // blip, phone screen locked, whatever), that's NOT fatal: the job
-        // keeps running on the server regardless, and the very next
-        // successful poll just picks up wherever it currently is. This is
-        // what actually fixes "network error" on tab switch / minimize - the
-        // old version held the entire pipeline hostage to one connection.
-        async function pollResearchJob(jobId, logs, sText) {
+        async function pollResearchJob(jobId, sText) {
             let lastMessage = "";
             let consecutiveFailures = 0;
 
@@ -613,21 +774,21 @@
                     res = await apiFetch(`/api/research/status/${jobId}`, { method: 'GET' });
                 } catch (e) {
                     consecutiveFailures++;
-                    if (consecutiveFailures >= 20) { // ~40s of total failure - genuinely give up
+                    if (consecutiveFailures >= 20) {
                         stopFakeProgress();
-                        sText.innerText = "❌ Lost connection. Your research may still be running - check 'Past Researches' in a minute.";
-                        logs.innerHTML += `<div>❌ Lost connection repeatedly. The job may still finish on the server - check your history shortly.</div>`;
+                        sText.innerText = "❌ Lost connection. Check 'Past Researches' in a minute.";
+                        appendLog("❌ Lost connection. Job may still finish — check history.");
                         return;
                     }
-                    continue; // brief blip - try again on the next tick, job is unaffected
+                    continue;
                 }
-                if (!res) return; // 401 - apiFetch already showed the access gate
+                if (!res) return;
                 consecutiveFailures = 0;
 
                 if (!res.ok) {
                     stopFakeProgress();
                     sText.innerText = "❌ Lost track of this research job. Please try again.";
-                    logs.innerHTML += `<div>❌ Lost track of this research job (it may have expired). Please try again.</div>`;
+                    appendLog("❌ Job expired or not found. Please try again.");
                     return;
                 }
 
@@ -635,8 +796,7 @@
                 if (job.message && job.message !== lastMessage) {
                     lastMessage = job.message;
                     sText.innerText = job.message;
-                    logs.innerHTML += `<div>${escapeHtml(job.message)}</div>`;
-                    logs.scrollTop = logs.scrollHeight;
+                    appendLog(job.message);
                 }
 
                 if (job.status === 'done') {
@@ -652,11 +812,9 @@
 
                     document.getElementById('terminal-container').classList.add('hidden');
                     document.getElementById('result-container').classList.remove('hidden');
-
                     document.getElementById('rag-chat').innerHTML = "";
                     document.getElementById('challenge-chat').innerHTML = "";
                     resetQuizSetup();
-
                     loadHistory();
                     return;
                 }
@@ -665,23 +823,18 @@
                     stopFakeProgress();
                     const errMsg = job.error || "Something went wrong.";
                     sText.innerText = "❌ " + errMsg;
-                    logs.innerHTML += `<div>❌ ${escapeHtml(errMsg)}</div>`;
+                    appendLog("❌ " + errMsg);
                     return;
                 }
-                // status === 'running' -> loop continues, poll again in 2s
             }
         }
 
-
-        // File upload - skip research entirely, analyze an existing report/PDF
+        // ── File Upload ───────────────────────────────────────────────────────
         async function uploadReport() {
             const input = document.getElementById('upload-input');
             const statusEl = document.getElementById('upload-status');
             const file = input.files[0];
-            if (!file) {
-                statusEl.innerHTML = '<span class="text-red-400">Please choose a file first.</span>';
-                return;
-            }
+            if (!file) { statusEl.innerHTML = '<span class="text-red-400">Please choose a file first.</span>'; return; }
             statusEl.innerHTML = '<span class="text-teal-400">Reading and processing your file...</span>';
 
             const formData = new FormData();
@@ -689,7 +842,7 @@
 
             try {
                 const res = await apiFetch('/api/upload-report', { method: 'POST', body: formData });
-                if (!res) return; // apiFetch already popped the access-gate modal on 401
+                if (!res) return;
 
                 if (!res.ok) {
                     let msg = 'Could not process that file.';
@@ -711,7 +864,6 @@
                 document.getElementById('rag-chat').innerHTML = "";
                 document.getElementById('challenge-chat').innerHTML = "";
                 resetQuizSetup();
-
                 statusEl.innerHTML = "";
                 input.value = "";
                 loadHistory();
@@ -720,7 +872,47 @@
             }
         }
 
-        // Interactive Tools - Podcast
+        // ── Upgrade 2: Export PDF with Watermark ──────────────────────────────
+        function exportPDF() {
+            // Watermark elements are shown via print CSS automatically
+            window.print();
+        }
+
+        // ── Upgrade 2: Share Link ─────────────────────────────────────────────
+        function shareReport() {
+            const topic = document.getElementById('res-topic').innerText || 'this topic';
+            const shareText = `🎓 AI Research Report: "${topic}"\n\nGenerated instantly via ThesisPilot — Learn AI With Ahmed.\n\n🚀 Try it free: ${window.location.origin}`;
+            navigator.clipboard.writeText(shareText).then(() => {
+                const btn = event.target;
+                const orig = btn.innerText;
+                btn.innerText = '✅ Copied!';
+                setTimeout(() => { btn.innerText = orig; }, 2000);
+            }).catch(() => {
+                prompt('Copy this shareable message:', shareText);
+            });
+        }
+
+        // ── Upgrade 2: Mindmap Export ─────────────────────────────────────────
+        function exportMindmap() {
+            const topic = document.getElementById('res-topic').innerText || 'Mindmap';
+            const svg = document.querySelector('#mindmap-box svg');
+            if (!svg) return;
+            const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = topic.replace(/\s+/g, '_') + '_mindmap.svg';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
+        // ── Upgrade 3: Confetti + Badges ─────────────────────────────────────
+        function triggerConfetti() {
+            if (typeof confetti === 'undefined') return;
+            confetti({ particleCount: 130, spread: 75, origin: { y: 0.55 }, colors: ['#14b8a6','#06b6d4','#6366f1','#f59e0b','#10b981'] });
+            setTimeout(() => confetti({ particleCount: 60, spread: 100, origin: { y: 0.4 }, scalar: 0.8 }), 350);
+        }
+
+        // ── Podcast ───────────────────────────────────────────────────────────
         let podcastPlaying = false;
         window.currentUtt = null;
 
@@ -728,7 +920,6 @@
             const report = document.getElementById('report-content').innerText;
             const box = document.getElementById('podcast-box');
             box.innerHTML = "Generating script...";
-
             try {
                 const res = await apiFetch('/generate-podcast', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -741,10 +932,6 @@
             } catch (e) { box.innerHTML = escapeHtml(e.message); }
         }
 
-        // Web Speech API voices load asynchronously on most browsers/devices -
-        // calling getVoices() immediately on page load often returns an empty
-        // list. This waits for the real list (with a safety timeout for
-        // browsers that never fire 'voiceschanged').
         function loadVoicesOnce() {
             return new Promise((resolve) => {
                 let voices = window.speechSynthesis.getVoices();
@@ -758,10 +945,6 @@
             });
         }
 
-        // The Web Speech API has no standard "gender" field on a voice, so we
-        // match on common name patterns (covers Android/Chrome, iOS/Safari,
-        // and Windows/Edge voice packs - e.g. "Alex"/"David"/"Daniel" are
-        // well-known male voices, "Zira"/"Samantha"/"Karen" are female ones).
         function findVoiceByNames(voices, keywords, langHint) {
             const english = voices.filter(v => (v.lang || '').toLowerCase().startsWith('en'));
             let pool = english.length ? english : voices;
@@ -772,25 +955,15 @@
             return pool.find(v => keywords.some(k => v.name.toLowerCase().includes(k))) || null;
         }
 
-        const MALE_HINTS = ['male', 'david', 'daniel', 'alex', 'fred', 'mark', 'george', 'guy', 'ravi', 'aaron', 'thomas', 'james', 'oliver'];
-        const FEMALE_HINTS = ['female', 'zira', 'samantha', 'karen', 'victoria', 'susan', 'moira', 'tessa', 'fiona', 'aria', 'jenny', 'sonia', 'kate'];
+        const MALE_HINTS   = ['male','david','daniel','alex','fred','mark','george','guy','ravi','aaron','thomas','james','oliver'];
+        const FEMALE_HINTS = ['female','zira','samantha','karen','victoria','susan','moira','tessa','fiona','aria','jenny','sonia','kate'];
 
-        function getPodcastSpeed() {
-            const el = document.getElementById('podcast-speed');
-            return el ? (parseFloat(el.value) || 1.0) : 1.0;
-        }
-
-        function getPodcastAccent() {
-            const el = document.getElementById('podcast-accent');
-            return el ? el.value : 'american';
-        }
+        function getPodcastSpeed() { const el = document.getElementById('podcast-speed'); return el ? (parseFloat(el.value) || 1.0) : 1.0; }
+        function getPodcastAccent() { const el = document.getElementById('podcast-accent'); return el ? el.value : 'american'; }
 
         function updatePodcastSpeedLabel() {
             const speed = getPodcastSpeed();
             document.getElementById('podcast-speed-label').innerText = speed.toFixed(1) + 'x';
-            // Live-adjust whatever is currently playing, not just the next line -
-            // <audio>.playbackRate can change mid-playback (browser voice rate
-            // can't, so that one only takes effect from the next line onward).
             if (window.currentAudio) window.currentAudio.playbackRate = speed;
         }
 
@@ -805,10 +978,6 @@
             const maleVoice = findVoiceByNames(voices, MALE_HINTS, langHint);
             const femaleVoice = findVoiceByNames(voices, FEMALE_HINTS, langHint);
 
-            // Which speaker gets which voice: match by name first (so a host
-            // literally called "Alex" reliably gets the male voice regardless
-            // of speaking order), then fall back to "whoever speaks first"
-            // for any other naming the AI happens to use (e.g. "Host A"/"Host B").
             const speakerOrder = [];
             function voiceFor(speakerName) {
                 const lower = speakerName.toLowerCase();
@@ -819,8 +988,6 @@
             }
 
             function speakWithBrowserVoice(line, kind) {
-                // Fallback path - used automatically when natural cloud TTS
-                // isn't configured/available, so the podcast tool always works.
                 const utt = new SpeechSynthesisUtterance(line.text);
                 utt.rate = getPodcastSpeed();
                 const chosenVoice = kind === 'male' ? maleVoice : femaleVoice;
@@ -833,9 +1000,6 @@
             }
 
             let i = 0;
-            // Prefetch cache: key = segment index, value = Promise resolving
-            // to {blob, kind} or null. Fetching N+1 while N is playing
-            // eliminates the silence gap between speaker turns.
             const prefetchCache = {};
 
             async function fetchAudioSegment(idx) {
@@ -850,30 +1014,18 @@
                     if (r && r.ok && (r.headers.get('content-type') || '').includes('audio')) {
                         return { blob: await r.blob(), kind: k };
                     }
-                } catch (e) { /* fall through */ }
+                } catch (e) {}
                 return null;
             }
 
             async function playNext() {
                 if (!podcastPlaying || i >= scriptArr.length) return;
                 const line = scriptArr[i];
-                // line.speaker / line.text arrive RAW from the server (not
-                // HTML-escaped) on purpose. We escape a copy just for the
-                // on-screen bubble below; the actual audio (cloud TTS or
-                // browser voice) always gets the original raw text, so
-                // punctuation like apostrophes is spoken correctly instead of
-                // as a literal "&#x27;"-style HTML-entity code.
                 const kind = voiceFor(line.speaker);
                 const color = kind === 'male' ? 'text-teal-400' : 'text-emerald-400';
                 box.innerHTML = `<strong class="${color}">${escapeHtml(line.speaker)}:</strong> <span class="text-white">${escapeHtml(line.text)}</span>`;
 
-                // Kick off prefetch for the NEXT segment in parallel so it's
-                // ready (or nearly ready) by the time this one finishes.
-                if (i + 1 < scriptArr.length && !prefetchCache[i + 1]) {
-                    prefetchCache[i + 1] = fetchAudioSegment(i + 1);
-                }
-
-                // Use cached promise if available, otherwise fetch now.
+                if (i + 1 < scriptArr.length && !prefetchCache[i + 1]) prefetchCache[i + 1] = fetchAudioSegment(i + 1);
                 if (!prefetchCache[i]) prefetchCache[i] = fetchAudioSegment(i);
                 const result = await prefetchCache[i];
                 delete prefetchCache[i];
@@ -889,11 +1041,8 @@
                     await audio.play();
                     return;
                 }
-
                 if (podcastPlaying) speakWithBrowserVoice(line, kind);
             }
-            // Pre-fetch the very first segment immediately so it's ready by
-            // the time the user hears the initial "Generating script..." flash.
             prefetchCache[0] = fetchAudioSegment(0);
             playNext();
         }
@@ -904,43 +1053,37 @@
             if (window.currentAudio) { window.currentAudio.pause(); window.currentAudio = null; }
         }
 
-        // Interactive Tools - Mindmap
+        // ── Mindmap ───────────────────────────────────────────────────────────
         async function generateMindmap() {
             const box = document.getElementById('mindmap-box');
             box.innerHTML = "Synthesizing diagram...";
             const report = document.getElementById('report-content').innerText;
-
             try {
                 const res = await apiFetch('/generate-diagram', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({report_text: report, language: currentLanguage})
                 });
                 if (!res) return;
-                if (!res.ok) throw new Error(`Server error (Status: ${res.status}). Check backend logs.`);
-
+                if (!res.ok) throw new Error(`Server error (Status: ${res.status}).`);
                 const data = await res.json();
                 if (data.mermaid) {
                     box.innerHTML = `<div class="mermaid">${data.mermaid}</div>`;
                     mermaid.init(undefined, document.querySelectorAll('.mermaid'));
-                } else {
-                    box.innerHTML = "Error generating diagram.";
-                }
+                } else { box.innerHTML = "Error generating diagram."; }
             } catch (e) {
                 box.innerHTML = `<span class="text-red-400 font-bold text-xs">${escapeHtml(e.message)}</span>`;
             }
         }
 
-        // Interactive Tools - RAG & Challenge Chat
-        async function handleChat(endpoint, inputId, boxId, userColor, aiColor) {
+        // ── RAG & Challenge ───────────────────────────────────────────────────
+        let vivaCount = 0;
+
+        async function handleChat(endpoint, inputId, boxId, userColor, aiColor, onSuccess) {
             const input = document.getElementById(inputId);
             const box = document.getElementById(boxId);
             const query = input.value.trim();
             if (!query) return;
-
             input.value = "";
-            // The user's own text is escaped before insertion - it's low-risk
-            // (it only reflects back to their own browser) but there's no
-            // reason to allow it to inject markup either.
             box.innerHTML += `<div class="${userColor} text-right bg-slate-800 p-1.5 rounded ml-6 text-xs">${escapeHtml(query)}</div>`;
             box.innerHTML += `<div id="typing-${boxId}" class="${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 text-xs">Thinking...</div>`;
             box.scrollTop = box.scrollHeight;
@@ -954,10 +1097,8 @@
                 if (!res) { if (typingEl) typingEl.remove(); return; }
                 const data = await res.json();
                 if (typingEl) typingEl.remove();
-                // data.answer is already sanitised HTML from the server
-                // (utils.security.sanitize_html); data.error, if present, is
-                // plain text and needs escaping.
                 box.innerHTML += `<div class="${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 markdown-body text-xs" style="font-size:0.75rem">${data.answer || escapeHtml(data.error || 'Something went wrong.')}</div>`;
+                if (onSuccess) onSuccess(data);
             } catch (e) {
                 const typingEl = document.getElementById(`typing-${boxId}`);
                 if (typingEl) typingEl.innerText = "Error contacting API.";
@@ -966,20 +1107,41 @@
         }
 
         function sendRAG() { handleChat('/ask-rag', 'rag-input', 'rag-chat', 'text-white', 'text-emerald-300'); }
-        function sendChallenge() { handleChat('/challenge-report', 'challenge-input', 'challenge-chat', 'text-white', 'text-red-300'); }
 
-        // Interactive Tools - Quiz Me / Viva Prep
+        function sendChallenge() {
+            handleChat('/challenge-report', 'challenge-input', 'challenge-chat', 'text-white', 'text-red-300', () => {
+                vivaCount++;
+                // Upgrade 3: Show Debate Master badge after 3 exchanges
+                if (vivaCount >= 3) {
+                    const badge = document.getElementById('viva-badge');
+                    if (badge && badge.classList.contains('hidden')) {
+                        badge.classList.remove('hidden');
+                        triggerConfetti();
+                    }
+                }
+            });
+        }
+
+        // ── Upgrade 3: Quiz with Score Tracker ───────────────────────────────
         let quizData = [];
+        let quizAnswered = 0;
+        let quizCorrect  = 0;
 
         async function startQuizMode() {
             const countInput = document.getElementById('quiz-count-input');
             const numQuestions = Math.min(20, Math.max(1, parseInt(countInput.value, 10) || 5));
             const report = document.getElementById('report-content').innerText;
 
+            quizAnswered = 0;
+            quizCorrect  = 0;
+            updateScoreBadge();
+
             document.getElementById('quiz-setup').classList.add('hidden');
+            document.getElementById('quiz-achievement').classList.add('hidden');
             const box = document.getElementById('quiz-box');
             box.classList.remove('hidden');
             box.innerHTML = `Generating ${numQuestions} quiz question${numQuestions > 1 ? 's' : ''}...`;
+
             try {
                 const res = await apiFetch('/generate-quiz', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -995,10 +1157,61 @@
         }
 
         function resetQuizSetup() {
+            quizAnswered = 0;
+            quizCorrect  = 0;
+            vivaCount    = 0;
             document.getElementById('quiz-setup').classList.remove('hidden');
+            document.getElementById('quiz-achievement').classList.add('hidden');
+            const scoreBadge = document.getElementById('quiz-score-badge');
+            if (scoreBadge) { scoreBadge.classList.add('hidden'); scoreBadge.innerText = '0/0'; }
+            const vivaBadge = document.getElementById('viva-badge');
+            if (vivaBadge) vivaBadge.classList.add('hidden');
             const box = document.getElementById('quiz-box');
             box.classList.add('hidden');
             box.innerHTML = '';
+        }
+
+        function updateScoreBadge() {
+            const badge = document.getElementById('quiz-score-badge');
+            if (!badge) return;
+            if (quizAnswered > 0) {
+                badge.classList.remove('hidden');
+                badge.innerText = `${quizCorrect}/${quizAnswered}`;
+                badge.className = badge.className.replace(/text-\w+-\d+/g, '');
+                const pct = quizCorrect / quizAnswered;
+                badge.classList.add(pct >= 0.8 ? 'text-emerald-300' : pct >= 0.5 ? 'text-amber-300' : 'text-red-300');
+            }
+        }
+
+        function checkQuizComplete() {
+            if (quizAnswered < quizData.length) return;
+            const pct = quizData.length > 0 ? quizCorrect / quizData.length : 0;
+            const achieve = document.getElementById('quiz-achievement');
+            const labelEl = document.getElementById('quiz-badge-label');
+            const textEl  = document.getElementById('quiz-badge-text');
+            const subEl   = document.getElementById('quiz-badge-sub');
+            if (!achieve) return;
+
+            if (pct === 1) {
+                labelEl.innerText = '🏆';
+                textEl.innerText  = 'Subject Expert 🏆';
+                subEl.innerText   = `Perfect Score! ${quizCorrect}/${quizData.length} correct.`;
+                achieve.classList.remove('hidden');
+                achieve.classList.add('flex');
+                triggerConfetti();
+            } else if (pct >= 0.7) {
+                labelEl.innerText = '🌟';
+                textEl.innerText  = 'Great Job! 🌟';
+                subEl.innerText   = `${quizCorrect}/${quizData.length} correct — keep it up!`;
+                achieve.classList.remove('hidden');
+                achieve.classList.add('flex');
+            } else {
+                labelEl.innerText = '📚';
+                textEl.innerText  = 'Keep Studying 📚';
+                subEl.innerText   = `${quizCorrect}/${quizData.length} correct — review the report and retry.`;
+                achieve.classList.remove('hidden');
+                achieve.classList.add('flex');
+            }
         }
 
         function renderQuiz() {
@@ -1040,11 +1253,16 @@
                 btn.disabled = true;
                 btn.classList.add('opacity-70');
                 if (i === q.correct_index) btn.classList.add('border-emerald-500', 'text-emerald-400');
-                else if (i === optIdx) btn.classList.add('border-red-500', 'text-red-400');
+                else if (i === optIdx)    btn.classList.add('border-red-500', 'text-red-400');
             }
-            resultEl.innerHTML = (optIdx === q.correct_index)
+            const isCorrect = (optIdx === q.correct_index);
+            resultEl.innerHTML = isCorrect
                 ? '<span class="text-emerald-400">✅ Correct!</span>'
                 : '<span class="text-red-400">❌ Not quite — correct answer highlighted above.</span>';
+            quizAnswered++;
+            if (isCorrect) quizCorrect++;
+            updateScoreBadge();
+            checkQuizComplete();
         }
 
         async function submitShortAnswer(qIdx) {
@@ -1067,12 +1285,20 @@
                 }
                 const scoreColor = data.score >= 7 ? 'text-emerald-400' : data.score >= 4 ? 'text-amber-400' : 'text-red-400';
                 resultEl.innerHTML = `<span class="${scoreColor} font-bold">Score: ${data.score}/10</span> — <span class="text-slate-400">${escapeHtml(data.feedback)}</span>`;
+                quizAnswered++;
+                if (data.score >= 7) quizCorrect++;
+                updateScoreBadge();
+                // disable the submit button
+                input.disabled = true;
+                const btn = input.nextElementSibling;
+                if (btn) btn.disabled = true;
+                checkQuizComplete();
             } catch (e) {
                 resultEl.innerHTML = '<span class="text-red-400">Grading failed. Please try again.</span>';
             }
         }
 
-        // Interactive Tools - One-Click Presentation (Auto-Slides)
+        // ── Slides ────────────────────────────────────────────────────────────
         let slidesData = [];
         let currentSlideIdx = 0;
 
@@ -1119,7 +1345,7 @@
         function nextSlide() { if (currentSlideIdx < slidesData.length - 1) { currentSlideIdx++; renderSlide(); } }
         function prevSlide() { if (currentSlideIdx > 0) { currentSlideIdx--; renderSlide(); } }
 
-        // Interactive Tools - Humanizer
+        // ── Humanizer ─────────────────────────────────────────────────────────
         let humanizerText = "";
 
         async function startHumanizerMode() {
@@ -1136,7 +1362,6 @@
                 const data = await res.json();
                 if (data.humanized) {
                     humanizerText = data.humanized;
-                    // Render as simple paragraphs
                     box.innerHTML = data.humanized
                         .split(/\n+/)
                         .filter(l => l.trim())
@@ -1152,16 +1377,12 @@
             if (!humanizerText) return;
             navigator.clipboard.writeText(humanizerText).then(() => {
                 const btn = document.activeElement;
-                if (btn && btn.tagName === 'BUTTON') {
-                    const orig = btn.innerText; btn.innerText = 'Copied!';
-                    setTimeout(() => { btn.innerText = orig; }, 1500);
-                }
+                if (btn && btn.tagName === 'BUTTON') { const orig = btn.innerText; btn.innerText = 'Copied!'; setTimeout(() => { btn.innerText = orig; }, 1500); }
             }).catch(() => {});
         }
 
-        // Interactive Tools - Smart Flashcards
+        // ── Flashcards ────────────────────────────────────────────────────────
         let flashcardsData = [];
-        let currentCardIdx = 0;
 
         async function startFlashcardsMode() {
             const report = document.getElementById('report-content').innerText;
@@ -1170,7 +1391,6 @@
             const box = document.getElementById('flashcards-box');
             box.innerHTML = `<span class="text-violet-400 animate-pulse">Generating ${numCards} flashcards…</span>`;
             flashcardsData = [];
-            currentCardIdx = 0;
             try {
                 const res = await apiFetch('/generate-flashcards', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1187,7 +1407,7 @@
             const box = document.getElementById('flashcards-box');
             if (!flashcardsData.length) { box.innerHTML = "<span class='text-red-400'>No flashcards generated. Please try again.</span>"; return; }
             box.innerHTML = flashcardsData.map((card, idx) => `
-                <div class="bg-slate-950 border border-violet-500/20 rounded-lg p-2.5 cursor-pointer hover:border-violet-500/50 transition"
+                <div class="glass-card border-violet-500/20 rounded-lg p-2.5 cursor-pointer neon-violet"
                      onclick="this.querySelector('.card-answer').classList.toggle('hidden')">
                     <div class="font-semibold text-white text-[11px] leading-snug">${idx + 1}. ${escapeHtml(card.question)}</div>
                     <div class="card-answer hidden mt-1.5 pt-1.5 border-t border-violet-500/20 text-violet-200 text-[10px] leading-relaxed">${escapeHtml(card.answer)}</div>
@@ -1200,11 +1420,7 @@
             const text = slidesData.map((s, i) => `Slide ${i + 1}: ${s.title}\n${s.bullets.map(b => '- ' + b).join('\n')}`).join('\n\n');
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.activeElement;
-                if (btn && btn.tagName === 'BUTTON') {
-                    const orig = btn.innerText;
-                    btn.innerText = 'Copied!';
-                    setTimeout(() => { btn.innerText = orig; }, 1500);
-                }
+                if (btn && btn.tagName === 'BUTTON') { const orig = btn.innerText; btn.innerText = 'Copied!'; setTimeout(() => { btn.innerText = orig; }, 1500); }
             }).catch(() => {});
         }
     </script>

@@ -191,6 +191,39 @@ RESEARCH_JOBS: dict = {}
 _background_tasks: set = set()
 _JOB_TTL_SECONDS = 3600  # stop tracking jobs older than this (finished or not)
 
+# ---------------------------------------------------------------------------
+# Upgrade 4: Lightweight in-memory report cache
+# If two users research the exact same topic+mode+language within the TTL
+# window, the second request is served instantly from cache — no API calls.
+# Capped at MAX_REPORT_CACHE_SIZE entries (evict oldest) to prevent unbounded
+# memory growth on the free tier (0.1 vCPU / 512 MB).
+# ---------------------------------------------------------------------------
+REPORT_CACHE: dict = {}
+_REPORT_CACHE_TTL = 21600   # 6 hours
+_MAX_REPORT_CACHE_SIZE = 40  # ~40 topics × ~20 KB each ≈ < 1 MB overhead
+
+
+def _report_cache_key(topic: str, mode: str, language: str) -> str:
+    return f"{topic.strip().lower()}|{mode}|{language.strip().lower()}"
+
+
+def _get_cached_report(key: str):
+    entry = REPORT_CACHE.get(key)
+    if not entry:
+        return None
+    if time.time() - entry["cached_at"] > _REPORT_CACHE_TTL:
+        REPORT_CACHE.pop(key, None)
+        return None
+    return entry["result"]
+
+
+def _set_cached_report(key: str, result: dict) -> None:
+    if len(REPORT_CACHE) >= _MAX_REPORT_CACHE_SIZE:
+        # Evict the oldest entry
+        oldest = min(REPORT_CACHE, key=lambda k: REPORT_CACHE[k]["cached_at"])
+        REPORT_CACHE.pop(oldest, None)
+    REPORT_CACHE[key] = {"result": result, "cached_at": time.time()}
+
 
 def _spawn_background(coro) -> None:
     """Fire-and-forget a coroutine on the running event loop, keeping a
@@ -219,6 +252,20 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
             RESEARCH_JOBS[job_id]["message"] = message
 
     try:
+        # Upgrade 4: serve from cache if available (same topic + mode + language)
+        cache_key = _report_cache_key(clean_topic, mode, language)
+        cached = _get_cached_report(cache_key)
+        if cached:
+            update("⚡ Serving from cache (instant)...")
+            await asyncio.sleep(0.3)  # tiny pause so the terminal shows the message
+            cached_result = dict(cached)
+            cached_result["metrics"] = dict(cached_result.get("metrics", {}))
+            cached_result["metrics"]["from_cache"] = True
+            cached_result["metrics"]["time_seconds"] = 0
+            if job_id in RESEARCH_JOBS:
+                RESEARCH_JOBS[job_id].update({"status": "done", "message": "✅ Served from cache!", "result": cached_result})
+            return
+
         update("▶ PHASE 0: Understanding your topic...")
         optimized_topic = await asyncio.to_thread(optimize_query, clean_topic)
         llm_calls += 1
@@ -277,11 +324,16 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
 
         report_html = sanitize_html(markdown.markdown(final_report, extensions=["tables", "fenced_code"]))
 
+        final_result = {"topic": optimized_topic, "report": report_html, "metrics": metrics}
+
+        # Upgrade 4: store in report cache for subsequent identical queries
+        _set_cached_report(cache_key, final_result)
+
         if job_id in RESEARCH_JOBS:
             RESEARCH_JOBS[job_id].update({
                 "status": "done",
                 "message": "✅ Report ready!",
-                "result": {"topic": optimized_topic, "report": report_html, "metrics": metrics},
+                "result": final_result,
             })
         logger.info(
             "Research complete: session=%s topic=%r mode=%s time=%.1fs",
