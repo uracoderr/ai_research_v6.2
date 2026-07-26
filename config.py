@@ -89,7 +89,17 @@ CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 21600))  # 6 hours
 #   it's ever missing locally - so history survives redeploys. Leave blank
 #   to keep using local-disk-only storage (nothing else changes).
 # ---------------------------------------------------------------------------
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+def _normalize_supabase_url(url: str) -> str:
+    """Accepts either the base project URL or the full REST API URL and
+    returns the base project URL (no trailing slash, no /rest/v1 suffix)."""
+    if not url:
+        return ""
+    url = url.strip().rstrip("/")
+    if url.endswith("/rest/v1"):
+        url = url[: -len("/rest/v1")]
+    return url.rstrip("/")
+
+SUPABASE_URL = _normalize_supabase_url(os.getenv("SUPABASE_URL", ""))
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "reports")
 
