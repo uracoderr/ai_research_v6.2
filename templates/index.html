@@ -900,7 +900,19 @@
                 }
 
                 if (job.status === 'done') {
+                    // Ensure stats panel shows 100% before switching views.
+                    // _setStatCell for section may still say 5/6 if the last
+                    // section completed in the same poll window as "done" — force it.
+                    if (job.phase_stats && job.phase_stats.section_total > 0) {
+                        const t = job.phase_stats.section_total;
+                        _setStatCell('stat-section', `${t}/${t}: Done ✅`);
+                        progressTarget = 95;  // ensure bar reaches soft cap before finish
+                    }
                     finishFakeProgress();
+                    setStep('🚀 Report ready!');
+                    // Brief pause so user sees 100% and the final stats before the view switches.
+                    await new Promise(r => setTimeout(r, 900));
+
                     const result = job.result;
                     currentTopic = result.metrics.safe_topic;
                     if (result.metrics.language) currentLanguage = result.metrics.language;
