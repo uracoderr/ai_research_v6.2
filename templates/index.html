@@ -410,7 +410,8 @@
                                 <div class="flex items-center gap-2">
                                     <select id="podcast-accent" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-[10px] text-slate-300 outline-none">
                                         <option value="american">🇺🇸 American</option>
-                                        <option value="indian">🇮🇳 Indian</option>
+                                        <option value="indian">🇮🇳 Indian (English)</option>
+                                        <option value="hindi">🇮🇳 Hindi (हिंदी)</option>
                                     </select>
                                     <span class="text-[10px]">🐢</span>
                                     <input type="range" id="podcast-speed" min="0.5" max="2" step="0.1" value="1"
@@ -1058,9 +1059,16 @@
         window.currentUtt = null;
 
         async function startPodcastMode() {
+            // Auto-select the right TTS accent to match the report language
+            const accentEl = document.getElementById('podcast-accent');
+            if (accentEl) {
+                if (currentLanguage === 'hindi') accentEl.value = 'hindi';
+                else if (currentLanguage === 'hinglish') accentEl.value = 'indian';
+                else if (accentEl.value === 'hindi') accentEl.value = 'american';
+            }
             const report = document.getElementById('report-content').innerText;
             const box = document.getElementById('podcast-box');
-            box.innerHTML = "Generating script...";
+            box.innerHTML = "Generating script…";
             try {
                 const res = await apiFetch('/generate-podcast', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1114,7 +1122,7 @@
             podcastPlaying = true;
 
             const accent = getPodcastAccent();
-            const langHint = accent === 'indian' ? 'IN' : 'US';
+            const langHint = accent === 'hindi' ? 'HI' : accent === 'indian' ? 'IN' : 'US';
             const voices = await loadVoicesOnce();
             const maleVoice = findVoiceByNames(voices, MALE_HINTS, langHint);
             const femaleVoice = findVoiceByNames(voices, FEMALE_HINTS, langHint);

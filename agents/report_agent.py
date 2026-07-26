@@ -319,22 +319,34 @@ def generate_report(
 
 def generate_podcast_script(report_text: str, language: str = "english") -> List[Dict]:
     lang_instruction = _language_instruction(language)
+    # Use quality (70B) model for non-English — the 8B model frequently drifts
+    # back into English mid-script when asked to write Hindi/Hinglish JSON.
+    model = "quality" if _is_non_english(language) else "fast"
+    system = (
+        f"You are a podcast scriptwriter. {lang_instruction} "
+        "Output ONLY a valid JSON array of speaker objects. "
+        "No preamble, no markdown code fences, no commentary after the array."
+    )
     prompt = (
-        "Convert this report into a fun, natural 2-person podcast script (Host A and Host B). "
+        "Convert this report into a fun, engaging 2-person podcast conversation between Host A and Host B. "
+        "Both hosts actively discuss the topic — asking each other questions, reacting to facts, "
+        "and explaining concepts simply. Generate at least 20-25 back-and-forth exchanges so the "
+        "full report is covered. "
         f"{lang_instruction} "
-        "RETURN STRICTLY A JSON ARRAY, nothing else. "
-        'Format: [{"speaker": "Host A", "text": "..."}]\n\n'
-        f"Report:\n{report_text[:6000]}"
+        "CRITICAL: every single word of every line must be in the language specified above. "
+        "RETURN STRICTLY A JSON ARRAY, nothing else. No markdown, no explanation. "
+        'Format: [{"speaker": "Host A", "text": "..."}, {"speaker": "Host B", "text": "..."}]\n\n'
+        f"Report:\n{report_text[:12000]}"
     )
     try:
-        raw = call_nvidia_api(prompt, max_tokens=1500, temperature=0.3, model="fast", retries=2)
+        raw = call_nvidia_api(prompt, system=system, max_tokens=3500, temperature=0.7, model=model, retries=3)
         # Use the same bracket-counting parser as all other tools — the old
         # greedy regex (r"\[\s*\{.*\}\s*\]", re.DOTALL) would capture from the
         # first "[" to the very last "]", producing invalid JSON whenever the
         # model emitted two arrays or trailing commentary.
         script = _extract_json_array(raw)
         clean = []
-        for line in script[:40]:
+        for line in script[:60]:
             if not isinstance(line, dict):
                 continue
             speaker = str(line.get("speaker", "Host"))[:20]
@@ -502,35 +514,47 @@ Respond with STRICT JSON only, nothing else:
 
 def generate_slides(report_text: str, language: str = "english") -> List[Dict]:
     """
-    Summarises a report into 5-6 presentation slides (short title + a few
-    bullet points each), for a "generate my class presentation" shortcut.
-    Uses the fast 8B model - this is a compression/summarisation task, not
-    one that needs the heavier model's deeper synthesis.
+    Summarises a report into 10-12 presentation slides (short title + bullet
+    points each), for a "generate my class presentation" shortcut.
+    Uses the quality 70B model — the 8B model frequently truncates the JSON
+    array before reaching 10 slides, producing only 1-3 slides.
     """
     lang_instruction = _language_instruction(language)
-    prompt = f"""Summarise this report into exactly 5-6 presentation slides for a short class
-presentation. Each slide needs a short title (under 8 words) and 3-5 concise bullet points (each
-under 15 words). The first slide should be a title/overview slide, the last should be a
-conclusion/takeaways slide. {lang_instruction}
+    prompt = f"""Summarise this report into exactly 10-12 presentation slides for a class presentation.
+Each slide must have a short title (under 8 words) and 4-5 concise bullet points (each under 20 words).
+Structure the slides as follows:
+1. Title / Overview slide
+2. Introduction & Background
+3. Core Concepts (slide 1)
+4. Core Concepts (slide 2, if needed)
+5. Current Applications & Examples
+6. Key Data & Statistics
+7. Challenges & Limitations
+8. Stakeholders & Impact
+9. Future Trends & Opportunities
+10. Case Studies or Evidence
+11. Key Takeaways
+12. Conclusion & Recommendations
+Adapt titles to match the report's actual content. {lang_instruction}
 
-RETURN STRICTLY A JSON ARRAY, nothing else. Format:
-[{{"title": "...", "bullets": ["...", "...", "..."]}}]
+RETURN STRICTLY A JSON ARRAY with 10-12 objects, nothing else. Format:
+[{{"title": "...", "bullets": ["...", "...", "...", "...", "..."]}}]
 
 Report:
-{report_text[:8000]}
+{report_text[:10000]}
 """
     try:
         raw = call_nvidia_api(
             prompt,
-            system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
-            max_tokens=900, temperature=0.4, model="fast", retries=2,
+            system="Output strictly valid JSON and nothing else - no commentary, no markdown fences. The array must contain 10-12 slide objects.",
+            max_tokens=2800, temperature=0.4, model="quality", retries=3,
         )
         slides = _extract_json_array(raw)
 
         clean = []
-        for s in slides[:8]:
+        for s in slides[:14]:
             title = str(s.get("title", "")).strip()[:80]
-            bullets = [str(b).strip()[:160] for b in (s.get("bullets") or []) if str(b).strip()][:6]
+            bullets = [str(b).strip()[:200] for b in (s.get("bullets") or []) if str(b).strip()][:6]
             if title and bullets:
                 clean.append({"title": title, "bullets": bullets})
         return clean or [{"title": "Slides unavailable", "bullets": ["Please try again."]}]
@@ -547,12 +571,15 @@ def humanize_report(report_text: str, language: str = "english") -> str:
     """
     Rewrites the report in a more natural, conversational style to reduce
     AI-detection markers, while preserving all facts and citations.
-    Uses the fast 8B model with a trimmed input so it stays well within the
-    80-second NVIDIA API timeout even on constrained hosting (Render free tier).
+    Uses the quality (70B) model for non-English so language fidelity is
+    maintained. For English, the fast model is used but with enough token
+    budget to complete the full rewrite without truncating.
     """
     lang_instruction = _language_instruction(language)
-    # Cap input at 5000 chars (~750 words) — enough for the model to rewrite a
-    # meaningful chunk without risking a timeout on slow API days.
+    # Quality model for non-English (8B drifts back to English / produces
+    # broken Devanagari mid-rewrite). Quality model also produces noticeably
+    # better humanization for long English reports.
+    model = "quality" if _is_non_english(language) else "fast"
     prompt = f"""Rewrite the following AI-generated report to sound more natural, human, and
 conversational — as if a knowledgeable student wrote it themselves. Rules:
 - Keep every fact, statistic, and citation exactly as-is.
@@ -562,19 +589,24 @@ conversational — as if a knowledgeable student wrote it themselves. Rules:
 - Keep all headings and structure.
 - Do NOT add new information or remove existing content.
 - Do NOT include any preamble or meta-commentary — start the rewritten text directly.
+- Rewrite the COMPLETE text below from start to finish — do not stop halfway through.
 {lang_instruction}
 
 Report to rewrite:
-{report_text[:5000]}
+{report_text[:8000]}
 """
     try:
         return call_nvidia_api(
             prompt,
-            system="You are an expert editor who makes AI-generated text sound naturally human while preserving all facts.",
-            max_tokens=1800,
+            system=(
+                "You are an expert editor who makes AI-generated text sound naturally human "
+                "while preserving all facts and structure. Write the complete rewrite from "
+                "start to finish without stopping early."
+            ),
+            max_tokens=2800,
             temperature=0.75,
-            model="fast",
-            retries=1,
+            model=model,
+            retries=3,
         )
     except LLMError as e:
         logger.error("Humanizer failed: %s", e)

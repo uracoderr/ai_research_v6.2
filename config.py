@@ -120,6 +120,13 @@ TTS_VOICES = {
         "male": os.getenv("TTS_IN_MALE_VOICE", "en-IN-PrabhatNeural"),
         "female": os.getenv("TTS_IN_FEMALE_VOICE", "en-IN-NeerjaNeural"),
     },
+    # Native Hindi neural voices for reports written in Hindi (Devanagari).
+    # English voices (even Indian-accented) cannot read Devanagari script —
+    # these proper hi-IN voices are required for Hindi podcast audio.
+    "hindi": {
+        "male": os.getenv("TTS_HI_MALE_VOICE", "hi-IN-MadhurNeural"),
+        "female": os.getenv("TTS_HI_FEMALE_VOICE", "hi-IN-SwaraNeural"),
+    },
 }
 DEFAULT_TTS_ACCENT = os.getenv("DEFAULT_TTS_ACCENT", "american")
 
