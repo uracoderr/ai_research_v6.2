@@ -40,9 +40,36 @@
             animation: shimmer 2s infinite linear;
         }
 
-        /* ── Upgrade 1: Terminal cursor blink ── */
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-        .terminal-cursor { display:inline-block; width:7px; height:13px; background:#00ff88; animation:blink 1s infinite; vertical-align:middle; margin-left:3px; border-radius:1px; }
+        /* ── Loading stepper card ── */
+        .loading-glass {
+            background: rgba(15, 23, 42, 0.72);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border: 1px solid rgba(255,255,255,0.07);
+            box-shadow: 0 8px 48px rgba(0,0,0,0.45);
+        }
+        .progress-gradient {
+            background: linear-gradient(90deg, #06B6D4, #10B981);
+            background-size: 200% 100%;
+            animation: progressShimmer 2.2s ease-in-out infinite;
+        }
+        @keyframes progressShimmer {
+            0%   { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        /* Step text cross-fade */
+        @keyframes stepIn  { from { opacity:0; transform:translateY(8px);  } to { opacity:1; transform:translateY(0);    } }
+        @keyframes stepOut { from { opacity:1; transform:translateY(0);    } to { opacity:0; transform:translateY(-8px); } }
+        .step-in  { animation: stepIn  0.4s ease both; }
+        .step-out { animation: stepOut 0.3s ease both; }
+        /* Orbiting dots spinner */
+        @keyframes orbit {
+            from { transform: rotate(0deg) translateX(22px) rotate(0deg); }
+            to   { transform: rotate(360deg) translateX(22px) rotate(-360deg); }
+        }
+        .orbit-dot { animation: orbit 1.4s linear infinite; }
+        .orbit-dot:nth-child(2) { animation-delay: -0.46s; }
+        .orbit-dot:nth-child(3) { animation-delay: -0.93s; }
 
         /* ── Upgrade 5: Glassmorphism tool cards ── */
         .glass-card {
@@ -205,39 +232,39 @@
                 </div>
             </div>
 
-            <!-- ══ UPGRADE 1: Live Thinking Terminal ══ -->
-            <div id="terminal-container" class="hidden max-w-2xl mx-auto w-full py-8 space-y-4 fade-in-up">
-                <!-- Terminal window chrome -->
-                <div class="rounded-2xl overflow-hidden border border-slate-700/60 shadow-2xl shadow-black/60">
-                    <!-- Title bar -->
-                    <div class="bg-slate-800 px-4 py-3 flex items-center gap-2 border-b border-slate-700/60">
-                        <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
-                        <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
-                        <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
-                        <span class="ml-3 text-[11px] text-slate-400 font-mono flex-1 text-center">thesispilot — research-agent — bash</span>
-                        <span id="terminal-elapsed" class="text-[10px] text-slate-500 font-mono">0.0s</span>
+            <!-- ══ Minimalist Stepper Loading ══ -->
+            <div id="terminal-container" class="hidden max-w-sm mx-auto w-full py-16 fade-in-up">
+                <div class="loading-glass rounded-2xl px-8 py-10 text-center space-y-8">
+
+                    <!-- Orbiting dots spinner -->
+                    <div class="relative w-12 h-12 mx-auto">
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <div class="w-2 h-2 rounded-full bg-cyan-400 orbit-dot"></div>
+                            <div class="w-2 h-2 rounded-full bg-teal-400 orbit-dot"></div>
+                            <div class="w-2 h-2 rounded-full bg-emerald-400 orbit-dot"></div>
+                        </div>
                     </div>
-                    <!-- Terminal body -->
-                    <div class="bg-[#0a0f1a] p-4 space-y-3">
-                        <!-- Status line -->
-                        <div class="flex items-center gap-2">
-                            <span class="text-emerald-400 font-mono text-xs">$</span>
-                            <p id="status-text" class="text-xs text-teal-300 font-mono flex-1">Initializing agents...</p>
-                            <span class="terminal-cursor"></span>
+
+                    <!-- Step message -->
+                    <div class="space-y-2 min-h-[4rem] flex flex-col items-center justify-center">
+                        <p id="status-text" class="text-[15px] font-semibold text-white leading-relaxed tracking-tight step-in">
+                            Starting up…
+                        </p>
+                        <p class="text-xs text-slate-500">Usually takes 30–90 seconds</p>
+                    </div>
+
+                    <!-- Thin gradient progress bar -->
+                    <div class="space-y-2">
+                        <div class="w-full bg-slate-800/70 rounded-full h-[3px] overflow-hidden">
+                            <div id="progress-bar" class="progress-gradient h-full rounded-full transition-all duration-700" style="width:2%"></div>
                         </div>
-                        <!-- Progress bar -->
-                        <div class="w-full bg-slate-900 rounded-full h-2.5 border border-slate-700/50 overflow-hidden">
-                            <div id="progress-bar" class="progress-shimmer h-full rounded-full transition-all duration-500" style="width:2%"></div>
-                        </div>
-                        <div class="flex justify-between text-[10px] text-slate-500 font-mono">
-                            <span>pipeline progress</span>
+                        <div class="flex justify-between text-[10px] text-slate-600">
+                            <span>Researching</span>
                             <span id="progress-pct">2%</span>
                         </div>
-                        <!-- Log output -->
-                        <div id="logs" class="bg-black/60 text-[11px] text-emerald-300 p-3 rounded-xl h-44 overflow-y-auto border border-slate-800 whitespace-pre-wrap font-mono leading-relaxed"></div>
                     </div>
                 </div>
-                <p class="text-center text-[10px] text-slate-600 font-mono">Research runs on the server — safe to switch tabs. Results auto-appear when ready.</p>
+                <p class="text-center text-[11px] text-slate-600 mt-5">Safe to switch tabs — results appear automatically.</p>
             </div>
 
             <!-- ══ RESULT ══ -->
@@ -634,11 +661,43 @@
             if (uploadStatus) uploadStatus.innerHTML = '';
         }
 
-        // ── Upgrade 1: Live Thinking Terminal ────────────────────────────────
+        // ── Loading stepper ───────────────────────────────────────────────────
         let progressTimer = null;
-        let progressValue = 0;
-        let researchStartTime = 0;
-        let elapsedTimer = null;
+        let progressValue  = 0;
+
+        // Maps raw backend messages → friendly one-liners shown to the user
+        const STEP_MAP = [
+            { match: /cache/i,                  label: '⚡ Serving from cache — instant results!' },
+            { match: /PHASE 0|Understanding/i,  label: '🧭 Understanding your topic…' },
+            { match: /PHASE 1|Searching/i,      label: '🔍 Deep-searching high-authority sources…' },
+            { match: /refined|optimized/i,      label: '✨ Query optimised for best results…' },
+            { match: /Found \d+/i,              label: '📦 Candidate sources discovered…' },
+            { match: /PHASE 2|Ranking|credib/i, label: '⚖️ Ranking sources by credibility…' },
+            { match: /selected/i,               label: '✅ Top sources selected…' },
+            { match: /PHASE 3|Reading|Extracti/i, label: '📄 Reading full articles…' },
+            { match: /PHASE 4|Writing/i,        label: '✍️ AI is synthesising your report…' },
+            { match: /ready|done/i,             label: '🚀 Finalising your study tools…' },
+        ];
+
+        function friendlyStep(msg) {
+            for (const s of STEP_MAP) {
+                if (s.match.test(msg)) return s.label;
+            }
+            return msg; // fall back to the raw message if nothing matched
+        }
+
+        function setStep(msg) {
+            const el = document.getElementById('status-text');
+            if (!el) return;
+            // Cross-fade: out → swap → in
+            el.classList.remove('step-in');
+            el.classList.add('step-out');
+            setTimeout(() => {
+                el.textContent = friendlyStep(msg);
+                el.classList.remove('step-out');
+                el.classList.add('step-in');
+            }, 300);
+        }
 
         function startFakeProgress() {
             const pBar = document.getElementById('progress-bar');
@@ -658,82 +717,26 @@
 
         function finishFakeProgress() {
             clearInterval(progressTimer);
-            clearInterval(elapsedTimer);
             document.getElementById('progress-bar').style.width = '100%';
             document.getElementById('progress-pct').innerText = '100%';
         }
 
         function stopFakeProgress() {
             clearInterval(progressTimer);
-            clearInterval(elapsedTimer);
-        }
-
-        function startElapsedTimer() {
-            researchStartTime = Date.now();
-            clearInterval(elapsedTimer);
-            elapsedTimer = setInterval(() => {
-                const secs = ((Date.now() - researchStartTime) / 1000).toFixed(1);
-                const el = document.getElementById('terminal-elapsed');
-                if (el) el.innerText = secs + 's';
-            }, 250);
-        }
-
-        function getElapsed() {
-            return ((Date.now() - researchStartTime) / 1000).toFixed(1);
-        }
-
-        // Maps backend phase messages to terminal-style icons + friendly labels
-        const PHASE_ICONS = {
-            'PHASE 0': '🧭',
-            'PHASE 1': '🔍',
-            'PHASE 2': '⚖️',
-            'PHASE 3': '📄',
-            'PHASE 4': '✍️',
-            'Found':   '📦',
-            'selected':'✅',
-            'Extracted':'✅',
-            'refined': '✨',
-            'ready':   '🚀',
-            'Starting':'⚙️',
-        };
-
-        function terminalIcon(msg) {
-            for (const [key, icon] of Object.entries(PHASE_ICONS)) {
-                if (msg.includes(key)) return icon;
-            }
-            return '▸';
-        }
-
-        function appendLog(msg) {
-            const logs = document.getElementById('logs');
-            if (!logs) return;
-            const elapsed = getElapsed();
-            const icon = terminalIcon(msg);
-            const line = document.createElement('div');
-            line.innerHTML = `<span class="text-slate-600">[${elapsed}s]</span> <span class="text-emerald-400">${icon}</span> <span class="text-green-300">${escapeHtml(msg)}</span>`;
-            logs.appendChild(line);
-            logs.scrollTop = logs.scrollHeight;
         }
 
         async function startResearch(event) {
             event.preventDefault();
             const topic = document.getElementById('topic-input').value.trim();
-            const lang = document.getElementById('lang-input').value;
-            const mode = document.getElementById('mode-input').value;
+            const lang  = document.getElementById('lang-input').value;
+            const mode  = document.getElementById('mode-input').value;
             if (!topic) return;
             currentLanguage = lang;
 
             document.getElementById('form-container').classList.add('hidden');
             document.getElementById('terminal-container').classList.remove('hidden');
-
-            const logs = document.getElementById('logs');
-            const sText = document.getElementById('status-text');
-            logs.innerHTML = "";
+            setStep('Starting up…');
             startFakeProgress();
-            startElapsedTimer();
-
-            appendLog(`Booting ThesisPilot research pipeline...`);
-            appendLog(`Topic: "${topic}" | Mode: ${mode} | Lang: ${lang}`);
 
             try {
                 const res = await apiFetch('/api/research/start', {
@@ -748,21 +751,19 @@
                     stopFakeProgress();
                     let message = `Request failed (${res.status})`;
                     try { const errJson = await res.json(); message = errJson.detail || errJson.error || message; } catch (_) {}
-                    sText.innerText = "❌ " + message;
-                    appendLog("❌ " + message);
+                    setStep('❌ ' + message);
                     return;
                 }
 
                 const { job_id } = await res.json();
-                await pollResearchJob(job_id, sText);
+                await pollResearchJob(job_id);
             } catch (e) {
                 stopFakeProgress();
-                sText.innerText = "❌ Connection error.";
-                appendLog("❌ " + e.message);
+                setStep('❌ Connection error — please try again.');
             }
         }
 
-        async function pollResearchJob(jobId, sText) {
+        async function pollResearchJob(jobId) {
             let lastMessage = "";
             let consecutiveFailures = 0;
 
@@ -776,8 +777,7 @@
                     consecutiveFailures++;
                     if (consecutiveFailures >= 20) {
                         stopFakeProgress();
-                        sText.innerText = "❌ Lost connection. Check 'Past Researches' in a minute.";
-                        appendLog("❌ Lost connection. Job may still finish — check history.");
+                        setStep('❌ Lost connection — check Past Researches in a minute.');
                         return;
                     }
                     continue;
@@ -787,16 +787,14 @@
 
                 if (!res.ok) {
                     stopFakeProgress();
-                    sText.innerText = "❌ Lost track of this research job. Please try again.";
-                    appendLog("❌ Job expired or not found. Please try again.");
+                    setStep('❌ Lost track of this job — please try again.');
                     return;
                 }
 
                 const job = await res.json();
                 if (job.message && job.message !== lastMessage) {
                     lastMessage = job.message;
-                    sText.innerText = job.message;
-                    appendLog(job.message);
+                    setStep(job.message);
                 }
 
                 if (job.status === 'done') {
@@ -821,9 +819,7 @@
 
                 if (job.status === 'error') {
                     stopFakeProgress();
-                    const errMsg = job.error || "Something went wrong.";
-                    sText.innerText = "❌ " + errMsg;
-                    appendLog("❌ " + errMsg);
+                    setStep('❌ ' + (job.error || 'Something went wrong — please try again.'));
                     return;
                 }
             }
