@@ -228,12 +228,14 @@ def generate_podcast_script(report_text: str) -> List[Dict]:
         script = json.loads(match.group(0))
         clean = []
         for line in script[:40]:
+            if not isinstance(line, dict):
+                continue
             speaker = str(line.get("speaker", "Host"))[:20]
             text = str(line.get("text", ""))[:600]
             if text:
                 clean.append({"speaker": speaker, "text": text})
         return clean or [{"speaker": "System", "text": "Sorry, the script came back empty. Please try again."}]
-    except (LLMError, json.JSONDecodeError) as e:
+    except (LLMError, json.JSONDecodeError, AttributeError) as e:
         logger.error("Podcast generation failed: %s", e)
         return [{"speaker": "System", "text": "Podcast generation failed. Please try again."}]
 

@@ -42,7 +42,7 @@ NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # App / environment
 # ---------------------------------------------------------------------------
 APP_ENV = os.getenv("APP_ENV", "development")            # "development" | "production"
-SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("SESSION_SECRET") or secrets.token_hex(32)
 SAAS_ACCESS_KEY = os.getenv("SAAS_ACCESS_KEY", "")        # blank = open access (no gate)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 

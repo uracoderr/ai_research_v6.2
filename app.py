@@ -438,9 +438,10 @@ async def api_upload_report(request: Request, file: UploadFile = File(...)):
     if ext not in ("pdf", "md", "txt"):
         raise HTTPException(status_code=400, detail="Please upload a .pdf, .md, or .txt file.")
 
-    raw_bytes = await file.read()
-    if len(raw_bytes) > config.MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(status_code=400, detail=f"File is too large (max {config.MAX_UPLOAD_MB}MB).")
+    max_bytes = config.MAX_UPLOAD_MB * 1024 * 1024
+    raw_bytes = await file.read(max_bytes + 1)
+    if len(raw_bytes) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File is too large (max {config.MAX_UPLOAD_MB}MB).")
 
     notice = None
     try:
@@ -449,7 +450,10 @@ async def api_upload_report(request: Request, file: UploadFile = File(...)):
             if was_truncated:
                 notice = f"This PDF has {total_pages} pages — only the first {config.MAX_PDF_PAGES} were processed."
         else:
-            text = raw_bytes.decode("utf-8", errors="ignore")
+            try:
+                text = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw_bytes.decode("latin-1")
     except Exception as e:
         logger.error("Upload extraction failed for %r: %s", filename, e)
         raise HTTPException(status_code=400, detail="Could not read that file. Please try a different one.")

@@ -52,7 +52,17 @@ def set(key: str, data) -> None:
         return
     path = _key_to_path(key)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"_cached_at": time.time(), "data": data}, f)
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"_cached_at": time.time(), "data": data}, f)
+            os.replace(tmp_path, path)  # atomic on POSIX; best-effort on Windows
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError:
         pass
