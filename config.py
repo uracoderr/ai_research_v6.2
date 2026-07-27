@@ -102,6 +102,7 @@ def _normalize_supabase_url(url: str) -> str:
 SUPABASE_URL = _normalize_supabase_url(os.getenv("SUPABASE_URL", ""))
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "reports")
+SUPABASE_TABLE_THESIS = os.getenv("SUPABASE_TABLE_THESIS", "thesis_sessions")
 
 # ---------------------------------------------------------------------------
 # Cloud text-to-speech (on by default, no API key needed) - for the Podcast tool

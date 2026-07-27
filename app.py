@@ -35,6 +35,9 @@ from agents.report_agent import (
     generate_quiz,
     generate_report,
     generate_slides,
+    generate_thesis_chapter,
+    generate_thesis_outline,
+    generate_thesis_preliminary,
     grade_short_answer,
     humanize_report,
     rag_query,
@@ -145,6 +148,16 @@ class GradeAnswerRequest(BaseModel):
     language: str = "english"
 
 
+class ThesisStartRequest(BaseModel):
+    topic: str = Field(..., min_length=3, max_length=300)
+    language: str = "english"
+
+
+class ThesisNextChapterRequest(BaseModel):
+    thesis_id: str = Field(..., min_length=8, max_length=64)
+    chapter_index: int = Field(..., ge=1, le=20)
+
+
 # ---------------------------------------------------------------------------
 # Pages & metadata
 # ---------------------------------------------------------------------------
@@ -158,13 +171,23 @@ async def home(request: Request):
 @app.get("/api/meta")
 async def get_meta(request: Request, response: Response):
     session.ensure_session(request, response)
+    modes = [
+        {"id": m["id"], "label": m["label"], "description": m["description"]}
+        for m in config.REPORT_MODES.values()
+    ]
+    # Thesis mode uses a completely separate pipeline — append it as a special entry
+    modes.append({
+        "id": "thesis",
+        "label": "📜 Thesis Mode",
+        "description": (
+            "Auto-generates a Master Outline then builds the thesis chapter by chapter "
+            "(~2000-2500 words each). Requires Supabase."
+        ),
+    })
     return {
         "access_required": bool(config.SAAS_ACCESS_KEY),
         "default_mode": config.DEFAULT_REPORT_MODE,
-        "modes": [
-            {"id": m["id"], "label": m["label"], "description": m["description"]}
-            for m in config.REPORT_MODES.values()
-        ],
+        "modes": modes,
     }
 
 
@@ -188,6 +211,7 @@ async def get_meta(request: Request, response: Response):
 # up wherever the job currently is. Nothing is lost.
 # ---------------------------------------------------------------------------
 RESEARCH_JOBS: dict = {}
+THESIS_JOBS: dict = {}
 _background_tasks: set = set()
 _JOB_TTL_SECONDS = 3600  # stop tracking jobs older than this (finished or not)
 
@@ -236,9 +260,10 @@ def _spawn_background(coro) -> None:
 
 def _prune_old_jobs() -> None:
     cutoff = time.time() - _JOB_TTL_SECONDS
-    stale = [jid for jid, job in RESEARCH_JOBS.items() if job.get("created_at", 0) < cutoff]
-    for jid in stale:
-        RESEARCH_JOBS.pop(jid, None)
+    for jobs_dict in (RESEARCH_JOBS, THESIS_JOBS):
+        stale = [jid for jid, job in jobs_dict.items() if job.get("created_at", 0) < cutoff]
+        for jid in stale:
+            jobs_dict.pop(jid, None)
 
 
 async def run_research_job(job_id: str, clean_topic: str, mode: str, language: str, session_id: str) -> None:
@@ -382,6 +407,130 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
             RESEARCH_JOBS[job_id].update({"status": "error", "error": friendly_error})
 
 
+# ---------------------------------------------------------------------------
+# Thesis pipeline — background job (same polling pattern as research jobs)
+# ---------------------------------------------------------------------------
+async def run_thesis_job(job_id: str, thesis_id: str, clean_topic: str, language: str, session_id: str) -> None:
+    """
+    Progressive thesis pipeline:
+      1. Web search + scrape (same phases as research pipeline)
+      2. Generate Master Thesis Outline (JSON, 7 sections) via LLM
+      3. Save outline + scraped context to Supabase thesis_sessions table
+      4. Generate Preliminary Pages section immediately
+      5. Return result — the frontend renders prelim pages then drives
+         chapter generation via POST /api/thesis/next-chapter
+    """
+    start_time = time.time()
+
+    def update(message: str) -> None:
+        if job_id in THESIS_JOBS:
+            THESIS_JOBS[job_id]["message"] = message
+
+    try:
+        update("▶ PHASE 0: Understanding your topic...")
+        optimized_topic = await asyncio.to_thread(optimize_query, clean_topic)
+        update(f"✨ Query refined to: '{optimized_topic}'")
+
+        update("▶ PHASE 1: Searching the web for source material...")
+        raw_articles = await asyncio.to_thread(fetch_articles, optimized_topic)
+        if not raw_articles:
+            THESIS_JOBS[job_id].update({"status": "error", "error": "No articles found for this topic. Try rephrasing it."})
+            return
+
+        update("▶ PHASE 2: Ranking source credibility...")
+        ranked_articles, _, _, _ = await asyncio.to_thread(
+            filter_and_rank_articles, raw_articles, config.SEARCH_MAX_RESULTS
+        )
+
+        update("▶ PHASE 3: Reading full articles...")
+        scraped_data, scraped_count, scraped_sources = await asyncio.to_thread(scrape_top_articles, ranked_articles)
+        if scraped_count == 0:
+            THESIS_JOBS[job_id].update({"status": "error", "error": "Could not read any sources. Please try again."})
+            return
+
+        update("▶ Generating Master Thesis Outline (this may take 20-30 seconds)...")
+        master_outline = await asyncio.to_thread(
+            generate_thesis_outline, optimized_topic, scraped_data, language
+        )
+        update(f"✅ Outline ready ({len(master_outline)} sections). Saving to Supabase...")
+
+        # Save thesis session (raises if Supabase not configured)
+        await asyncio.to_thread(
+            report_store.save_thesis_session,
+            session_id, thesis_id, optimized_topic, master_outline, scraped_data, language
+        )
+
+        update("✍️ Generating Preliminary Pages...")
+        preliminary_md = await asyncio.to_thread(
+            generate_thesis_preliminary, optimized_topic, master_outline, scraped_data, language
+        )
+
+        header_md = (
+            f"# {optimized_topic.title()} — Academic Thesis\n\n"
+            f"> 📜 **Thesis Mode** | Master outline generated with {len(master_outline)} sections\n\n"
+        )
+        full_preliminary_md = header_md + preliminary_md
+        preliminary_html = sanitize_html(markdown.markdown(full_preliminary_md, extensions=["tables", "fenced_code"]))
+
+        elapsed = round(time.time() - start_time, 1)
+        metrics = {
+            "time_seconds": elapsed,
+            "llm_calls": 3,
+            "sources_found": len(raw_articles),
+            "sources_used": scraped_count,
+            "word_count": len(full_preliminary_md.split()),
+            "reading_minutes": 2,
+            "confidence_score": 90,
+            "mode_label": "Thesis Mode",
+            "model_used": f"NVIDIA Llama-3.1 ({config.MODEL_QUALITY.split('/')[-1]})",
+        }
+
+        # Also save preliminary as a regular report so it appears in history
+        paths = await asyncio.to_thread(
+            report_store.save_report,
+            session_id, optimized_topic + " Thesis", full_preliminary_md, scraped_data, metrics
+        )
+        metrics["safe_topic"] = paths["slug"]
+        metrics["md_download"] = f"/api/report/{paths['slug']}/download/md"
+        metrics["html_download"] = f"/api/report/{paths['slug']}/download/html"
+
+        final_result = {
+            "topic": optimized_topic,
+            "report": preliminary_html,
+            "metrics": metrics,
+            "thesis_id": thesis_id,
+            "master_outline": master_outline,
+            "current_chapter_index": 1,   # 0 = preliminary done; 1 = first chapter to generate
+        }
+
+        if job_id in THESIS_JOBS:
+            THESIS_JOBS[job_id].update({
+                "status": "done",
+                "message": "✅ Preliminary Pages ready! Generate your first chapter below.",
+                "result": final_result,
+            })
+        logger.info(
+            "Thesis outline+preliminary complete: session=%s topic=%r sections=%d time=%.1fs",
+            session_id, optimized_topic, len(master_outline), elapsed,
+        )
+
+    except Exception as e:
+        logger.error("Thesis pipeline error (job=%s): %s\n%s", job_id, e, traceback.format_exc())
+        err_str = str(e)
+        if "timeout" in err_str.lower() or "timed out" in err_str.lower():
+            friendly = "Research took too long. Try a narrower topic."
+        elif "429" in err_str or "rate" in err_str.lower():
+            friendly = "The AI model is busy right now. Please wait a moment and try again."
+        elif "Supabase" in err_str or "supabase" in err_str.lower():
+            friendly = "Could not save thesis session. Please configure SUPABASE_URL and SUPABASE_KEY."
+        elif "outline" in err_str.lower():
+            friendly = "Could not generate a thesis outline. Please try again or rephrase your topic."
+        else:
+            friendly = "Something went wrong generating the thesis. Please try again."
+        if job_id in THESIS_JOBS:
+            THESIS_JOBS[job_id].update({"status": "error", "error": friendly})
+
+
 @app.post("/api/research/start", dependencies=[Depends(require_access_key)])
 async def api_start_research(request: Request, payload: ResearchRequest):
     existing_session = session.read_session_id(request)
@@ -438,6 +587,141 @@ async def api_research_status(job_id: str, request: Request):
         "result": job["result"],
         "error": job["error"],
         "phase_stats": job.get("phase_stats", {}),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Thesis Mode API routes
+# ---------------------------------------------------------------------------
+
+@app.post("/api/thesis/start", dependencies=[Depends(require_access_key)])
+async def api_start_thesis(request: Request, payload: ThesisStartRequest):
+    """
+    Starts the thesis pipeline as a background job. Returns a job_id immediately;
+    the client polls /api/thesis/status/{job_id} to track progress.
+    Requires Supabase to be configured (the master outline must persist between
+    chapter generation requests).
+    """
+    if not report_store._supabase_configured():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Thesis Mode requires Supabase. "
+                "Please set the SUPABASE_URL and SUPABASE_KEY environment variables "
+                "and create the thesis_sessions table (see replit.md for the SQL)."
+            ),
+        )
+
+    existing_session = session.read_session_id(request)
+    session_id = existing_session or uuid.uuid4().hex
+
+    try:
+        clean_topic = validate_topic(payload.topic)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    language = (payload.language or "english").capitalize()
+    thesis_id = uuid.uuid4().hex
+
+    _prune_old_jobs()
+    job_id = uuid.uuid4().hex
+    THESIS_JOBS[job_id] = {
+        "status": "running",
+        "message": "▶ Starting thesis pipeline...",
+        "session_id": session_id,
+        "created_at": time.time(),
+        "result": None,
+        "error": None,
+    }
+    _spawn_background(run_thesis_job(job_id, thesis_id, clean_topic, language, session_id))
+
+    resp = JSONResponse(content={"job_id": job_id})
+    if not existing_session:
+        session.set_session_cookie(resp, session_id)
+    return resp
+
+
+@app.get("/api/thesis/status/{job_id}")
+async def api_thesis_status(job_id: str, request: Request):
+    job = THESIS_JOBS.get(job_id)
+    session_id = session.read_session_id(request)
+    if not job or job.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="Thesis job not found (it may have expired).")
+    return {
+        "status": job["status"],
+        "message": job["message"],
+        "result": job["result"],
+        "error": job["error"],
+        "phase_stats": {},
+    }
+
+
+@app.post("/api/thesis/next-chapter", dependencies=[Depends(require_access_key)])
+async def api_thesis_next_chapter(request: Request, response: Response, payload: ThesisNextChapterRequest):
+    """
+    Generates the next chapter of an in-progress thesis.
+    Fetches the master_outline and scraped_context from Supabase, generates
+    the requested section, advances the chapter index, and returns HTML.
+    """
+    session_id = session.ensure_session(request, response)
+
+    # Fetch session (verifies ownership via session_id)
+    thesis_session = await asyncio.to_thread(
+        report_store.get_thesis_session, session_id, payload.thesis_id
+    )
+    if not thesis_session:
+        raise HTTPException(status_code=404, detail="Thesis session not found or has expired.")
+
+    master_outline = thesis_session.get("master_outline") or []
+    if not master_outline:
+        raise HTTPException(status_code=400, detail="Thesis outline is missing — please start a new thesis.")
+
+    chapter_index = payload.chapter_index
+    if chapter_index < 1 or chapter_index >= len(master_outline):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid chapter index {chapter_index} (outline has {len(master_outline)} sections)."
+        )
+
+    # Prevent skipping chapters (must generate in order)
+    stored_index = thesis_session.get("current_chapter_index", 1)
+    if chapter_index > stored_index:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Please generate chapters in order. Next expected chapter: {stored_index}."
+        )
+
+    scraped_context = thesis_session.get("scraped_context", "")
+    topic = thesis_session.get("topic", "")
+    language = thesis_session.get("language", "English")
+
+    try:
+        chapter_md = await asyncio.to_thread(
+            generate_thesis_chapter, topic, master_outline, chapter_index, scraped_context, language
+        )
+    except Exception as e:
+        logger.error("Thesis chapter generation failed (thesis_id=%s, idx=%d): %s", payload.thesis_id, chapter_index, e)
+        err_str = str(e)
+        if "timeout" in err_str.lower():
+            raise HTTPException(status_code=503, detail="Chapter generation timed out. Please try again.")
+        raise HTTPException(status_code=500, detail="Could not generate this chapter. Please try again.")
+
+    # Advance the stored chapter index (best-effort; non-fatal if it fails)
+    await asyncio.to_thread(
+        report_store.update_thesis_chapter_index, payload.thesis_id, chapter_index + 1
+    )
+
+    chapter_html = sanitize_html(markdown.markdown(chapter_md, extensions=["tables", "fenced_code"]))
+
+    logger.info(
+        "Thesis chapter generated: thesis_id=%s section_index=%d topic=%r",
+        payload.thesis_id, chapter_index, topic,
+    )
+    return {
+        "chapter_html": chapter_html,
+        "chapter_index": chapter_index,
+        "next_index": chapter_index + 1,
+        "total_sections": len(master_outline),
     }
 
 

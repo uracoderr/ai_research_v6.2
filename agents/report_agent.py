@@ -656,3 +656,211 @@ Report:
     except (LLMError, json.JSONDecodeError) as e:
         logger.error("Flashcard generation failed: %s", e)
         return [{"question": "Error", "answer": "Could not generate flashcards. Please try again."}]
+
+
+# ---------------------------------------------------------------------------
+# Thesis Mode — progressive, chapter-by-chapter thesis generation
+# ---------------------------------------------------------------------------
+
+def generate_thesis_outline(topic: str, scraped_text: str, language: str = "english") -> List[Dict]:
+    """
+    Generates a 7-section Master Thesis Outline as a JSON array.
+    Called once at the start of Thesis Mode; the outline drives all
+    subsequent chapter generation requests.
+    Each section: {title, key, section_type, bullet_points}
+    section_type: "preliminary" | "chapter" | "references"
+    """
+    lang_instruction = _language_instruction(language)
+    system = (
+        "You are an expert academic thesis advisor. "
+        "Output ONLY a valid JSON array — no preamble, no markdown fences, "
+        "no text before or after the array."
+    )
+    prompt = f"""Create a comprehensive Master Thesis Outline for a thesis on: "{topic}"
+
+The outline must contain exactly 7 sections in this exact order:
+1. Preliminary Pages
+2. Chapter 1: Introduction
+3. Chapter 2: Literature Review
+4. Chapter 3: Research Methodology
+5. Chapter 4: Results & Discussion
+6. Chapter 5: Conclusion & Recommendations
+7. References & Bibliography
+
+Rules:
+- For each section, provide 5-7 bullet points that are HIGHLY SPECIFIC to the topic "{topic}".
+- Make each bullet point a concrete, measurable content requirement — not generic boilerplate.
+- Use the research context below to make bullet points accurate and insightful.
+- section_type values: "preliminary" for section 1, "chapter" for sections 2-6, "references" for section 7.
+{lang_instruction}
+
+Research context (use this to make bullet points specific):
+{scraped_text[:8000]}
+
+RETURN STRICTLY A JSON ARRAY (exactly 7 objects, no more, no less):
+[
+  {{"title": "Preliminary Pages", "key": "preliminary", "section_type": "preliminary", "bullet_points": ["..."]}},
+  {{"title": "Chapter 1: Introduction", "key": "ch1_introduction", "section_type": "chapter", "bullet_points": ["..."]}},
+  {{"title": "Chapter 2: Literature Review", "key": "ch2_literature_review", "section_type": "chapter", "bullet_points": ["..."]}},
+  {{"title": "Chapter 3: Research Methodology", "key": "ch3_methodology", "section_type": "chapter", "bullet_points": ["..."]}},
+  {{"title": "Chapter 4: Results & Discussion", "key": "ch4_results_discussion", "section_type": "chapter", "bullet_points": ["..."]}},
+  {{"title": "Chapter 5: Conclusion & Recommendations", "key": "ch5_conclusion", "section_type": "chapter", "bullet_points": ["..."]}},
+  {{"title": "References & Bibliography", "key": "references", "section_type": "references", "bullet_points": ["..."]}}
+]"""
+    try:
+        raw = call_nvidia_api(prompt, system=system, max_tokens=2600, temperature=0.5, model="quality", retries=3)
+        outline = _extract_json_array(raw)
+        clean = []
+        for item in outline[:10]:
+            title = str(item.get("title", "")).strip()[:120]
+            raw_key = str(item.get("key", "")).strip()[:60].replace(" ", "_")
+            section_type = item.get("section_type", "chapter")
+            if section_type not in ("preliminary", "chapter", "references"):
+                section_type = "chapter"
+            bullets = [str(b).strip()[:400] for b in (item.get("bullet_points") or []) if str(b).strip()][:8]
+            if title and raw_key and bullets:
+                clean.append({"title": title, "key": raw_key, "section_type": section_type, "bullet_points": bullets})
+        if len(clean) < 3:
+            raise LLMError(f"Thesis outline too short ({len(clean)} sections); model may have failed.")
+        return clean
+    except (LLMError, json.JSONDecodeError) as e:
+        logger.error("Thesis outline generation failed: %s", e)
+        raise LLMError(f"Could not generate thesis outline: {e}") from e
+
+
+def generate_thesis_preliminary(
+    topic: str, outline: List[Dict], scraped_text: str, language: str = "english"
+) -> str:
+    """
+    Generates the Preliminary Pages (title page, abstract, table of contents,
+    acknowledgements) based on the master outline. Called immediately after
+    the outline is saved so the user sees something right away.
+    """
+    lang_instruction = _language_instruction(language)
+    prelim = next((s for s in outline if s.get("section_type") == "preliminary"), outline[0])
+    bullet_list = "\n".join(f"  - {b}" for b in prelim.get("bullet_points", []))
+    toc_entries = "\n".join(f"  {i + 1}. {s['title']}" for i, s in enumerate(outline))
+    system = (
+        "You are an expert academic thesis writer. "
+        "Strictly adhere to the provided Master Outline. "
+        "Do not hallucinate or write content meant for future chapters. "
+        f"Write only the Preliminary Pages. {lang_instruction}"
+    )
+    prompt = f"""Write the complete Preliminary Pages for a thesis on: "{topic}"
+
+Include ALL of the following components in order:
+1. Title Page — include: full topic title, sub-title if applicable, "Submitted by: [Student Name]",
+   institution and department fields, academic year
+2. Abstract — 250-300 words summarising: research problem, methodology to be used, expected
+   findings, and significance of the study
+3. Acknowledgements — 2-3 sentences, professional academic tone
+4. Table of Contents — list every section from the full outline below (use page numbers as "XX")
+
+Specific requirements from the outline:
+{bullet_list}
+
+FULL THESIS STRUCTURE (reference this for the Table of Contents only — do NOT write chapter content):
+{toc_entries}
+
+{lang_instruction}
+Write in formal academic prose. Target 600-800 words total.
+
+Source context (use only to inform the abstract):
+{scraped_text[:3000]}
+"""
+    try:
+        content = call_nvidia_api(
+            prompt, system=system, max_tokens=1800, temperature=0.4, model="quality", retries=3
+        )
+        return f"## {prelim['title']}\n\n{content.strip()}"
+    except LLMError as e:
+        logger.error("Thesis preliminary generation failed: %s", e)
+        raise LLMError(f"Could not generate preliminary pages: {e}") from e
+
+
+def generate_thesis_chapter(
+    topic: str,
+    outline: List[Dict],
+    section_index: int,
+    scraped_text: str,
+    language: str = "english",
+) -> str:
+    """
+    Generates one section of the thesis (chapter or references) identified
+    by section_index in the master outline. Enforces strict scope — the model
+    is told exactly which sections come before and after so it does not leak
+    content across chapter boundaries.
+    """
+    if section_index < 0 or section_index >= len(outline):
+        raise LLMError(f"Invalid section_index {section_index} for outline of length {len(outline)}.")
+
+    section = outline[section_index]
+    lang_instruction = _language_instruction(language)
+    bullet_list = "\n".join(f"  - {b}" for b in section.get("bullet_points", []))
+    prev_titles = [outline[i]["title"] for i in range(section_index)]
+    next_titles = [outline[i]["title"] for i in range(section_index + 1, len(outline))]
+
+    if section.get("section_type") == "references":
+        system = (
+            "You are an expert academic thesis writer. "
+            "Write only the References & Bibliography section. "
+            "Format all citations in APA 7th edition. "
+            f"{lang_instruction}"
+        )
+        prompt = f"""Write the References & Bibliography for a thesis on: "{topic}"
+
+Extract real sources from the context and format each in APA 7th edition.
+For sources with incomplete details, fill missing fields reasonably — never fabricate DOIs or URLs.
+
+Requirements from the outline:
+{bullet_list}
+
+{lang_instruction}
+Generate at least 10-15 properly formatted APA references relevant to this topic.
+
+Source context (extract and format references from this):
+{scraped_text[:6000]}
+"""
+        try:
+            content = call_nvidia_api(
+                prompt, system=system, max_tokens=1500, temperature=0.3, model="quality", retries=3
+            )
+            return f"## {section['title']}\n\n{content.strip()}"
+        except LLMError as e:
+            logger.error("Thesis references generation failed: %s", e)
+            raise LLMError(f"Could not generate references section: {e}") from e
+
+    system = (
+        "You are an expert academic thesis writer. "
+        "Strictly adhere to the provided Master Outline. "
+        "Do not hallucinate or write content meant for other chapters. "
+        "Write ONLY the specific chapter requested — no general thesis introduction, "
+        "no summaries of other chapters, no cross-chapter repetition. "
+        f"{lang_instruction}"
+    )
+    prompt = f"""Write "{section['title']}" for a thesis on: "{topic}"
+
+STRICT SCOPE RULES:
+1. Write ONLY this chapter's content — nothing else.
+2. DO NOT repeat or summarise already-written sections: {', '.join(prev_titles) if prev_titles else 'none yet'}.
+3. DO NOT anticipate or write content belonging to future sections: {', '.join(next_titles) if next_titles else 'none'}.
+4. You MUST cover every one of these bullet points from the Master Outline:
+{bullet_list}
+
+{lang_instruction}
+Target: 2000-2500 words. Write in formal academic prose.
+Use sub-headings (###) to organise ideas within the chapter.
+When citing a specific fact, figure, or claim from the source data, note the source name.
+End the chapter naturally — do not add a general "conclusion" paragraph unless this IS the Conclusion chapter.
+
+Source context:
+{scraped_text[:10000]}
+"""
+    try:
+        content = call_nvidia_api(
+            prompt, system=system, max_tokens=3500, temperature=0.5, model="quality", retries=3
+        )
+        return f"## {section['title']}\n\n{content.strip()}"
+    except LLMError as e:
+        logger.error("Thesis chapter generation failed (section=%r): %s", section.get("title"), e)
+        raise LLMError(f"Could not generate {section.get('title', 'chapter')}: {e}") from e

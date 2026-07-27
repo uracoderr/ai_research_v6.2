@@ -282,6 +282,86 @@ def list_reports(session_id: str) -> List[Dict[str, str]]:
     return items
 
 
+# ---------------------------------------------------------------------------
+# Thesis session storage (Supabase-backed, thesis mode requires Supabase)
+# ---------------------------------------------------------------------------
+
+def save_thesis_session(
+    session_id: str,
+    thesis_id: str,
+    topic: str,
+    master_outline: list,
+    scraped_context: str = "",
+    language: str = "English",
+) -> None:
+    """Save a new thesis session to Supabase. Raises on failure (thesis requires it)."""
+    if not _supabase_configured():
+        raise RuntimeError(
+            "Thesis Mode requires Supabase. "
+            "Please set SUPABASE_URL and SUPABASE_KEY environment variables."
+        )
+    url = f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE_THESIS}"
+    payload = {
+        "thesis_id": thesis_id,
+        "session_id": session_id,
+        "topic": topic,
+        "master_outline": master_outline,
+        "current_chapter_index": 1,   # 0 = preliminary (already generated), 1 = next to generate
+        "scraped_context": scraped_context[:30000],   # cap for DB storage
+        "language": language,
+    }
+    try:
+        resp = requests.post(
+            url, json=payload,
+            headers=_supabase_headers(prefer="return=minimal"),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.error("Supabase thesis session save failed: %s", e)
+        raise RuntimeError(f"Could not save thesis session to Supabase: {e}") from e
+
+
+def get_thesis_session(session_id: str, thesis_id: str) -> Optional[dict]:
+    """
+    Fetch a thesis session from Supabase, verifying session ownership.
+    Returns the row dict or None if not found / Supabase unavailable.
+    """
+    if not _supabase_configured():
+        return None
+    url = (
+        f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE_THESIS}"
+        f"?thesis_id=eq.{thesis_id}&session_id=eq.{session_id}&select=*&limit=1"
+    )
+    try:
+        resp = requests.get(url, headers=_supabase_headers(), timeout=15)
+        resp.raise_for_status()
+        rows = resp.json()
+        return rows[0] if rows else None
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.warning("Supabase thesis session fetch failed: %s", e)
+        return None
+
+
+def update_thesis_chapter_index(thesis_id: str, new_index: int) -> None:
+    """Advance current_chapter_index after a chapter is successfully generated."""
+    if not _supabase_configured():
+        return
+    url = (
+        f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE_THESIS}"
+        f"?thesis_id=eq.{thesis_id}"
+    )
+    try:
+        resp = requests.patch(
+            url, json={"current_chapter_index": new_index},
+            headers=_supabase_headers(prefer="return=minimal"),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.warning("Supabase thesis chapter index update failed (non-fatal): %s", e)
+
+
 def file_path_for_download(session_id: str, safe_topic: str, fmt: str) -> Optional[str]:
     if fmt not in ("md", "html"):
         return None

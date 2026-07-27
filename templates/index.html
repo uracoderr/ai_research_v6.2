@@ -205,12 +205,12 @@
                         </div>
                         <div>
                             <label class="text-xs font-bold text-slate-400 uppercase">Report Mode</label>
-                            <select id="mode-input" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm mt-1 focus:border-teal-500 outline-none transition">
+                            <select id="mode-input" onchange="updateSubmitLabel(this.value)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm mt-1 focus:border-teal-500 outline-none transition">
                                 <option value="assignment">Assignment (Fast)</option>
                             </select>
                         </div>
                     </div>
-                    <button type="submit" class="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-xl transition text-white shadow-lg shadow-teal-900/50 neon-teal">Run Deep Synthesis</button>
+                    <button id="submit-btn" type="submit" class="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-xl transition text-white shadow-lg shadow-teal-900/50 neon-teal">Run Deep Synthesis</button>
                 </form>
 
                 <div class="flex items-center gap-3">
@@ -519,6 +519,29 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- ══ THESIS PROGRESS AREA (visible only in thesis mode) ══ -->
+                <div id="thesis-progress-area" class="hidden bg-indigo-900/20 border border-indigo-500/30 rounded-xl p-5 space-y-3 no-print fade-in-up">
+                    <div class="flex items-center justify-between">
+                        <span class="text-indigo-300 font-bold text-sm">📜 Thesis Builder</span>
+                        <span id="thesis-progress-label" class="text-xs text-slate-400 font-mono">Preliminary Pages generated</span>
+                    </div>
+                    <div class="w-full bg-slate-800/70 rounded-full h-[5px] overflow-hidden">
+                        <div id="thesis-progress-bar" class="bg-indigo-500 h-full rounded-full transition-all duration-700" style="width:14%"></div>
+                    </div>
+                    <p class="text-[11px] text-slate-500">Click the button below to generate each chapter one at a time. Each section is ~2000-2500 words.</p>
+                    <p id="thesis-generating-msg" class="hidden text-xs text-teal-400 animate-pulse">✍️ Generating chapter — this takes about 30-60 seconds…</p>
+                    <p id="thesis-error-msg" class="hidden text-xs text-red-400"></p>
+                    <button id="thesis-next-btn"
+                            onclick="generateNextThesisChapter()"
+                            class="w-full bg-indigo-600 hover:bg-indigo-500 font-bold py-3 rounded-xl transition text-white text-sm neon-violet">
+                        Generate Chapter 1: Introduction →
+                    </button>
+                    <div id="thesis-complete-msg" class="hidden text-center py-2">
+                        <span class="text-emerald-400 font-bold text-sm">🎓 Thesis Complete! All sections have been generated.</span>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -527,6 +550,23 @@
         mermaid.initialize({ startOnLoad: false, theme: 'dark' });
         let currentTopic = "";
         let currentLanguage = "english";
+
+        // ── Thesis Mode state ─────────────────────────────────────────────────
+        let currentThesisId = null;
+        let currentThesisOutline = [];
+        let currentThesisChapterIndex = 1;
+
+        function updateSubmitLabel(mode) {
+            const btn = document.getElementById('submit-btn');
+            if (!btn) return;
+            if (mode === 'thesis') {
+                btn.textContent = '📜 Generate Thesis Outline';
+                btn.className = btn.className.replace('bg-teal-600 hover:bg-teal-500', 'bg-indigo-600 hover:bg-indigo-500');
+            } else {
+                btn.textContent = 'Run Deep Synthesis';
+                btn.className = btn.className.replace('bg-indigo-600 hover:bg-indigo-500', 'bg-teal-600 hover:bg-teal-500');
+            }
+        }
 
         // ── Helpers ──────────────────────────────────────────────────────────
         function escapeHtml(str) {
@@ -685,6 +725,16 @@
 
         function showNewResearchForm() {
             closeMobileSidebar();
+            // Reset thesis state
+            currentThesisId = null;
+            currentThesisOutline = [];
+            currentThesisChapterIndex = 1;
+            const thesisArea = document.getElementById('thesis-progress-area');
+            if (thesisArea) thesisArea.classList.add('hidden');
+            const thesisCompleteMsg = document.getElementById('thesis-complete-msg');
+            if (thesisCompleteMsg) thesisCompleteMsg.classList.add('hidden');
+            const thesisNextBtn = document.getElementById('thesis-next-btn');
+            if (thesisNextBtn) { thesisNextBtn.classList.remove('hidden'); thesisNextBtn.disabled = false; thesisNextBtn.classList.remove('opacity-50'); }
             document.getElementById('result-container').classList.add('hidden');
             document.getElementById('terminal-container').classList.add('hidden');
             document.getElementById('form-container').classList.remove('hidden');
@@ -858,6 +908,12 @@
             if (!topic) return;
             currentLanguage = lang;
 
+            // Thesis Mode uses a separate progressive pipeline
+            if (mode === 'thesis') {
+                await startThesisMode(topic, lang);
+                return;
+            }
+
             document.getElementById('form-container').classList.add('hidden');
             document.getElementById('terminal-container').classList.remove('hidden');
             setStep('Starting up…');
@@ -966,6 +1022,224 @@
                     const retryBtn = document.getElementById('retry-research-btn');
                     if (retryBtn) retryBtn.classList.remove('hidden');
                     return;
+                }
+            }
+        }
+
+        // ── Thesis Mode ───────────────────────────────────────────────────────
+        async function startThesisMode(topic, lang) {
+            document.getElementById('form-container').classList.add('hidden');
+            document.getElementById('terminal-container').classList.remove('hidden');
+            setStep('📜 Starting Thesis Mode…');
+            startFakeProgress();
+
+            try {
+                const res = await apiFetch('/api/thesis/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic, language: lang })
+                });
+
+                if (!res) { stopFakeProgress(); showNewResearchForm(); return; }
+
+                if (!res.ok) {
+                    stopFakeProgress();
+                    let message = `Request failed (${res.status})`;
+                    try { const errJson = await res.json(); message = errJson.detail || errJson.error || message; } catch (_) {}
+                    setStep('❌ ' + message);
+                    const retryBtn = document.getElementById('retry-research-btn');
+                    if (retryBtn) retryBtn.classList.remove('hidden');
+                    const spinner = document.querySelector('#terminal-container .orbit-dot')?.closest('.relative');
+                    if (spinner) spinner.style.display = 'none';
+                    return;
+                }
+
+                const { job_id } = await res.json();
+                await pollThesisJob(job_id);
+            } catch (e) {
+                stopFakeProgress();
+                setStep('❌ Connection error — please try again.');
+            }
+        }
+
+        async function pollThesisJob(jobId) {
+            let lastMessage = "";
+            let consecutiveFailures = 0;
+
+            while (true) {
+                await new Promise(r => setTimeout(r, 2500));
+
+                let res;
+                try {
+                    res = await apiFetch(`/api/thesis/status/${jobId}`, { method: 'GET' });
+                } catch (e) {
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= 20) {
+                        stopFakeProgress();
+                        setStep('❌ Lost connection — please try again.');
+                        return;
+                    }
+                    continue;
+                }
+                if (!res) return;
+                consecutiveFailures = 0;
+
+                if (!res.ok) {
+                    stopFakeProgress();
+                    setStep('❌ Lost track of this job — please try again.');
+                    return;
+                }
+
+                const job = await res.json();
+                if (job.message && job.message !== lastMessage) {
+                    lastMessage = job.message;
+                    setStep(job.message);
+                }
+
+                if (job.status === 'done') {
+                    finishFakeProgress();
+                    setStep('🎓 Preliminary Pages ready!');
+                    await new Promise(r => setTimeout(r, 800));
+
+                    const result = job.result;
+                    showThesisResult(result);
+                    return;
+                }
+
+                if (job.status === 'error') {
+                    stopFakeProgress();
+                    setStep('❌ ' + (job.error || 'Something went wrong — please try again.'));
+                    const spinner = document.querySelector('#terminal-container .orbit-dot')?.closest('.relative');
+                    if (spinner) spinner.style.display = 'none';
+                    const retryBtn = document.getElementById('retry-research-btn');
+                    if (retryBtn) retryBtn.classList.remove('hidden');
+                    return;
+                }
+            }
+        }
+
+        function showThesisResult(result) {
+            // Store thesis state globally
+            currentThesisId = result.thesis_id;
+            currentThesisOutline = result.master_outline || [];
+            currentThesisChapterIndex = result.current_chapter_index || 1;
+            currentTopic = result.metrics.safe_topic;
+            if (result.metrics.language) currentLanguage = result.metrics.language;
+
+            // Populate standard report UI (same fields as normal research)
+            document.getElementById('res-topic').innerText = result.topic;
+            document.getElementById('download-md').href = result.metrics.md_download;
+            document.getElementById('download-html').href = result.metrics.html_download;
+            document.getElementById('report-content').innerHTML = result.report;
+            renderMetrics(result.metrics);
+
+            // Show the result container
+            document.getElementById('terminal-container').classList.add('hidden');
+            document.getElementById('result-container').classList.remove('hidden');
+            document.getElementById('rag-chat').innerHTML = "";
+            document.getElementById('challenge-chat').innerHTML = "";
+            resetQuizSetup();
+            loadHistory();
+
+            // Show thesis progress area and initialise the first chapter button
+            const thesisArea = document.getElementById('thesis-progress-area');
+            if (thesisArea) thesisArea.classList.remove('hidden');
+            updateThesisProgressUI();
+
+            // Scroll to thesis progress area after a brief delay
+            setTimeout(() => {
+                if (thesisArea) thesisArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 400);
+        }
+
+        function updateThesisProgressUI() {
+            const total = currentThesisOutline.length;
+            const done  = currentThesisChapterIndex;   // index = how many sections are done
+            const pct   = total > 0 ? Math.round((done / total) * 100) : 14;
+
+            const bar = document.getElementById('thesis-progress-bar');
+            if (bar) bar.style.width = pct + '%';
+
+            const label = document.getElementById('thesis-progress-label');
+            if (label) label.textContent = `${done} of ${total} sections generated`;
+
+            const btn = document.getElementById('thesis-next-btn');
+            const completeMsg = document.getElementById('thesis-complete-msg');
+
+            if (done >= total) {
+                // All sections done
+                if (btn) btn.classList.add('hidden');
+                if (completeMsg) completeMsg.classList.remove('hidden');
+                triggerConfetti();
+            } else {
+                // Show button for the next section to generate
+                const nextSection = currentThesisOutline[done];
+                if (btn && nextSection) {
+                    btn.classList.remove('hidden');
+                    btn.textContent = `Generate ${nextSection.title} →`;
+                }
+                if (completeMsg) completeMsg.classList.add('hidden');
+            }
+        }
+
+        async function generateNextThesisChapter() {
+            if (!currentThesisId) return;
+            if (currentThesisChapterIndex >= currentThesisOutline.length) return;
+
+            const btn     = document.getElementById('thesis-next-btn');
+            const genMsg  = document.getElementById('thesis-generating-msg');
+            const errMsg  = document.getElementById('thesis-error-msg');
+
+            if (btn)    { btn.disabled = true; btn.classList.add('opacity-50'); }
+            if (genMsg) genMsg.classList.remove('hidden');
+            if (errMsg) errMsg.classList.add('hidden');
+
+            try {
+                const res = await apiFetch('/api/thesis/next-chapter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        thesis_id: currentThesisId,
+                        chapter_index: currentThesisChapterIndex
+                    })
+                });
+
+                if (!res) throw new Error('Request failed — check your connection.');
+
+                if (!res.ok) {
+                    const errJson = await res.json().catch(() => ({}));
+                    throw new Error(errJson.detail || errJson.error || `Server error (${res.status})`);
+                }
+
+                const data = await res.json();
+
+                // Append the new chapter HTML to the report content
+                const reportContent = document.getElementById('report-content');
+                const divider = document.createElement('hr');
+                divider.className = 'border-slate-700 my-4';
+                reportContent.appendChild(divider);
+
+                const chapterDiv = document.createElement('div');
+                chapterDiv.innerHTML = data.chapter_html;
+                chapterDiv.className = 'thesis-chapter fade-in-up';
+                reportContent.appendChild(chapterDiv);
+
+                // Advance index and update UI
+                currentThesisChapterIndex++;
+                updateThesisProgressUI();
+
+                // Smooth scroll to new chapter
+                setTimeout(() => chapterDiv.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+
+            } catch (e) {
+                if (errMsg) { errMsg.textContent = '❌ ' + e.message; errMsg.classList.remove('hidden'); }
+                if (btn)    { btn.disabled = false; btn.classList.remove('opacity-50'); }
+            } finally {
+                if (genMsg) genMsg.classList.add('hidden');
+                // Re-enable button only if we didn't just finish (updateThesisProgressUI hides it when done)
+                if (btn && currentThesisChapterIndex < currentThesisOutline.length) {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50');
                 }
             }
         }

@@ -56,6 +56,36 @@ All tools dynamically respond in the language you select (English / Hinglish / H
 | `utils/report_store.py` | Per-session report storage (disk + optional Supabase) |
 | `utils/session.py` | Anonymous signed cookie sessions |
 
+## Thesis Mode — Supabase setup (required)
+
+Thesis Mode saves the master outline between chapter requests, so it needs Supabase.
+
+**Step 1** — Add two secrets in the Replit Secrets tab:
+| Secret | Value |
+|--------|-------|
+| `SUPABASE_URL` | Your Supabase project URL, e.g. `https://xxxx.supabase.co` |
+| `SUPABASE_KEY` | Your Supabase `anon` / service key |
+
+**Step 2** — Run this SQL once in your **Supabase SQL Editor**:
+
+```sql
+CREATE TABLE IF NOT EXISTS thesis_sessions (
+    thesis_id        TEXT PRIMARY KEY,
+    session_id       TEXT NOT NULL,
+    topic            TEXT NOT NULL,
+    master_outline   JSONB NOT NULL DEFAULT '[]',
+    current_chapter_index INTEGER NOT NULL DEFAULT 1,
+    scraped_context  TEXT DEFAULT '',
+    language         TEXT DEFAULT 'English',
+    created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_thesis_sessions_session_id
+    ON thesis_sessions(session_id);
+```
+
+The existing `reports` table is unchanged. Thesis Mode is additive — regular research, Flash and Assignment modes all continue to work without Supabase.
+
 ## User preferences
 
 - Keep the project's existing structure and stack — do not restructure or migrate it.
