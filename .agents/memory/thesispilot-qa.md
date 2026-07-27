@@ -108,3 +108,13 @@ CREATE INDEX IF NOT EXISTS idx_thesis_sessions_session_id ON thesis_sessions(ses
 ### Config
 - `config.SUPABASE_TABLE_THESIS` = `"thesis_sessions"` (separate env var from `SUPABASE_TABLE`).
 - Thesis mode appears at the END of the modes list from `/api/meta` (hardcoded append, not in `REPORT_MODES`).
+
+---
+
+## Pasted-prompt specs sometimes assume the wrong stack
+
+This user tends to drop generic "Expert Full-Stack Engineer" AI-prompt templates into `attached_assets/Pasted-*.txt` as feature requests. At least one referenced "Node.js/Express" and `Promise.allSettled()` verbatim even though this app is Python/FastAPI.
+
+**Why:** these read as templates copied from elsewhere and adapted loosely to this project, not specs written against the actual codebase — implementing them literally would introduce the wrong idioms or silently reverse deliberate tuning decisions (e.g. asking to remove the fast 8B model entirely, or hardcoding the quiz question count, both of which contradict earlier deliberate choices documented above).
+
+**How to apply:** before implementing a pasted spec, sanity-check its assumed stack/APIs against the real code, translate idioms (`asyncio.gather(..., return_exceptions=True)` instead of `Promise.allSettled`, FastAPI `StreamingResponse`/SSE instead of Node streams), and confirm any tradeoff that reverses a documented decision or removes an existing user-facing option before building it.
