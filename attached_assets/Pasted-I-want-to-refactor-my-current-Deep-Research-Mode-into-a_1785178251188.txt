@@ -1,0 +1,24 @@
+I want to refactor my current "Deep Research Mode" into a new "Thesis Mode" for my Assignment Helper web app. I am using Supabase for the database and Nvidia Llama 3.1 70B API for text generation. 
+
+Please implement the following architecture and update the frontend UI and backend logic accordingly:
+
+**Phase 1: Database & State Update**
+1. Create a new table or update the existing Supabase schema to store thesis sessions. It must include: `thesis_id`, `topic`, `master_outline` (JSONB), and `current_chapter_index` (Integer).
+
+**Phase 2: Master Outline Generation (Hidden from User)**
+1. When a user selects "Thesis Mode" and submits a topic, DO NOT generate the full report immediately.
+2. First, send a prompt to the LLM to generate a highly detailed "Master Thesis Outline" in STRICT JSON format. 
+3. The JSON should contain an array of objects representing steps: Preliminary Pages, Chapter 1, Chapter 2, etc., along with bullet points of what needs to be covered in each. 
+4. Save this JSON `master_outline` to Supabase.
+
+**Phase 3: The `report_agent` Workflow**
+1. Update the `report_agent` logic. After saving the outline, the agent should immediately generate and return ONLY the "Preliminary Pages" (Title, Abstract, etc.) based on the outline.
+2. Ensure the `report_agent` receives a strict system prompt instructing it to: "Strictly adhere to the provided Master Outline. Do not hallucinate or write content meant for future chapters. Write only the section requested."
+
+**Phase 4: Frontend UI Updates (Progressive Generation)**
+1. In the UI, after the "Preliminary Pages" are rendered, display a button at the bottom saying "Generate Chapter 1: Introduction" (dynamically fetch the chapter name from the master outline). Do not show an open text input for the next step.
+2. When the user clicks this button, send a request to the backend with the `thesis_id`. 
+3. The backend must fetch the `master_outline` from Supabase, extract the specific instructions for the next chapter, and send a targeted prompt to the `report_agent` to generate ONLY that specific chapter (target word count ~2000-2500 words).
+4. Append the new chapter to the UI below the previous one, and update the button to say "Generate Chapter 2", continuing this loop until the thesis is complete.
+
+Please write the necessary frontend components, backend API routes, and update the `report_agent` LLM prompts to execute this workflow perfectly.
