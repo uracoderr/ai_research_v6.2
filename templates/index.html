@@ -206,11 +206,13 @@
                         <div>
                             <label class="text-xs font-bold text-slate-400 uppercase">Report Mode</label>
                             <select id="mode-input" onchange="updateSubmitLabel(this.value)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm mt-1 focus:border-teal-500 outline-none transition">
-                                <option value="assignment">Assignment (Fast)</option>
+                                <option value="flash">Flash Mode (Superfast)</option>
+                                <option value="assignment" selected>Assignment Mode (Fast)</option>
+                                <option value="thesis">📜 Thesis Mode</option>
                             </select>
                         </div>
                     </div>
-                    <button id="submit-btn" type="submit" class="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-xl transition text-white shadow-lg shadow-teal-900/50 neon-teal">Run Deep Synthesis</button>
+                    <button id="submit-btn" type="submit" class="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-xl transition text-white shadow-lg shadow-teal-900/50 neon-teal">Generate Report</button>
                 </form>
 
                 <div class="flex items-center gap-3">

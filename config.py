@@ -151,6 +151,33 @@ DEFAULT_TTS_ACCENT = os.getenv("DEFAULT_TTS_ACCENT", "american")
 #   behaviour for anyone who explicitly wants more.
 # ---------------------------------------------------------------------------
 REPORT_MODES = {
+    "flash": {
+        "id": "flash",
+        "label": "Flash Mode (Superfast)",
+        "description": "~900-1100 words, key highlights only, entirely on the fast 8B model. Best for a quick first look.",
+        "sections": [
+            {
+                "key": "introduction", "title": "📖 Quick Overview",
+                "instruction": "Briefly introduce the topic: what it is and why it matters, in a few tight sentences.",
+                "model": "fast", "max_tokens": 380, "target_words": "180-220", "temperature": 0.4, "delay": 0.0,
+            },
+            {
+                "key": "analysis", "title": "🔍 Key Highlights",
+                "instruction": "Cover the most important facts and current state of the topic using the source data, as concisely as possible.",
+                "model": "fast", "max_tokens": 650, "target_words": "380-430", "temperature": 0.45, "delay": 0.15,
+            },
+            {
+                "key": "challenges", "title": "⚖️ Notable Challenges & Trends",
+                "instruction": "List the most important challenges and trends briefly, grounded in the source data.",
+                "model": "fast", "max_tokens": 480, "target_words": "280-320", "temperature": 0.45, "delay": 0.3,
+            },
+            {
+                "key": "conclusion", "title": "✅ Quick Takeaways",
+                "instruction": "Summarise into 3-4 short, punchy takeaways. Do not introduce new facts.",
+                "model": "fast", "max_tokens": 320, "target_words": "160-200", "temperature": 0.4, "delay": 0.45,
+            },
+        ],
+    },
     "assignment": {
         "id": "assignment",
         "label": "Assignment Mode (Fast)",
@@ -185,75 +212,6 @@ REPORT_MODES = {
                 "key": "conclusion", "title": "✅ Conclusion & Key Takeaways",
                 "instruction": "Summarise the report into 4-6 clear takeaways and a short closing paragraph. Do not introduce new facts.",
                 "model": "fast", "max_tokens": 600, "target_words": "300-360", "temperature": 0.4, "delay": 0.6,
-            },
-        ],
-    },
-    "deep": {
-        "id": "deep",
-        "label": "Deep Research Mode",
-        "description": "~3800-4800 words, exhaustive multi-angle report. Slower (aim ~5-6 min).",
-        "sections": [
-            {
-                "key": "executive", "title": "📊 Executive Summary & Introduction",
-                "instruction": "Provide a detailed executive summary and introduction to the topic and its significance.",
-                "model": "quality", "max_tokens": 950, "target_words": "550-620", "temperature": 0.5, "delay": 0.0,
-            },
-            {
-                "key": "background", "title": "📚 Historical Context & Background",
-                "instruction": "Cover the historical context and background needed to understand the topic in depth.",
-                "model": "quality", "max_tokens": 950, "target_words": "550-620", "temperature": 0.5, "delay": 0.5,
-            },
-            {
-                "key": "architecture", "title": "⚙️ Core Technical & Conceptual Deep-Dive",
-                "instruction": "Provide a deep-dive analysis of the core technical or conceptual pillars, grounded in the source data.",
-                "model": "quality", "max_tokens": 1100, "target_words": "650-720", "temperature": 0.5, "delay": 1.0,
-            },
-            {
-                "key": "market", "title": "🌍 Real-World Applications & Case Studies",
-                "instruction": "Cover concrete real-world applications, case studies, and market drivers from the source data.",
-                "model": "quality", "max_tokens": 1100, "target_words": "650-720", "temperature": 0.5, "delay": 1.5,
-            },
-            {
-                "key": "risk_matrix", "title": "⚠️ Challenges, Risks & Limitations",
-                "instruction": "Contrast opportunities against systemic risks, challenges, and limitations.",
-                "model": "quality", "max_tokens": 950, "target_words": "550-620", "temperature": 0.5, "delay": 2.0,
-            },
-            {
-                "key": "roadmap", "title": "🔮 Future Trends & Predictions",
-                "instruction": "Provide predictive analysis, emerging trends, and a forward-looking timeline.",
-                "model": "quality", "max_tokens": 950, "target_words": "550-620", "temperature": 0.5, "delay": 2.5,
-            },
-            {
-                "key": "conclusion", "title": "✅ Conclusion & Strategic Recommendations",
-                "instruction": "Summarise the report's core findings into clear strategic recommendations and takeaways.",
-                "model": "quality", "max_tokens": 700, "target_words": "400-450", "temperature": 0.45, "delay": 3.0,
-            },
-        ],
-    },
-    "flash": {
-        "id": "flash",
-        "label": "Flash Mode (Superfast)",
-        "description": "~900-1100 words, key highlights only, entirely on the fast 8B model. Best for a quick first look.",
-        "sections": [
-            {
-                "key": "introduction", "title": "📖 Quick Overview",
-                "instruction": "Briefly introduce the topic: what it is and why it matters, in a few tight sentences.",
-                "model": "fast", "max_tokens": 380, "target_words": "180-220", "temperature": 0.4, "delay": 0.0,
-            },
-            {
-                "key": "analysis", "title": "🔍 Key Highlights",
-                "instruction": "Cover the most important facts and current state of the topic using the source data, as concisely as possible.",
-                "model": "fast", "max_tokens": 650, "target_words": "380-430", "temperature": 0.45, "delay": 0.15,
-            },
-            {
-                "key": "challenges", "title": "⚖️ Notable Challenges & Trends",
-                "instruction": "List the most important challenges and trends briefly, grounded in the source data.",
-                "model": "fast", "max_tokens": 480, "target_words": "280-320", "temperature": 0.45, "delay": 0.3,
-            },
-            {
-                "key": "conclusion", "title": "✅ Quick Takeaways",
-                "instruction": "Summarise into 3-4 short, punchy takeaways. Do not introduce new facts.",
-                "model": "fast", "max_tokens": 320, "target_words": "160-200", "temperature": 0.4, "delay": 0.45,
             },
         ],
     },
