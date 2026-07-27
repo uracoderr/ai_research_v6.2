@@ -1,0 +1,26 @@
+Role: You are an Expert Full-Stack AI Engineer and System Architect.
+​Context & Objective: > We are upgrading the architecture of our AI assignment application, "ThesisPilot". Currently, the app uses smaller 8B models for some tools. I want to completely remove all instances of 8B models and strictly use the highly capable 70B model (e.g., meta/llama-3.1-70b-instruct via NVIDIA API) across the entire application.
+​To prevent the 70B model's latency from ruining the User Experience, you must implement an "Asynchronous Background Queue" and "Token Streaming" architecture paired with our Supabase database.
+​Execute the following architectural refactoring step-by-step:
+​Step 1: Global 70B Upgrade
+​Scan the entire codebase. Locate every API call or configuration currently using an 8B model and replace it with the 70B model. Ensure the max_tokens and temperature settings are appropriately configured for high-quality academic generation.
+​Step 2: Implement the Background Queue System (Pre-computing)
+​Modify the main "Report Generation" endpoint.
+​Once the initial main report is generated and sent to the client, immediately trigger a non-blocking background process using Promise.allSettled().
+​This background process must silently call the 70B model to generate the static tools: Auto-PPT, Mindmap, Flashcards, and Quiz.
+​Save all these pre-generated outputs directly into the relevant Supabase tables linked to the specific report_id.
+​Goal: When the user clicks on any of these tools on the frontend, the data should be fetched instantly from Supabase with zero API wait time.
+​Step 3: Refactor the Quiz Module (Locked at 15)
+​Remove any frontend UI or backend logic that asks the user for the "number of quiz questions".
+​Hardcode the system prompt for the background Quiz generation task to strictly generate exactly 15 high-quality questions along with their correct answers.
+​Step 4: Viva Mode Optimization (First-Move Pre-generation & Streaming)
+​During the same background queue process (Step 2), prompt the 70B model to generate the very first Viva question based on the report, and save it to Supabase.
+​When the user enters "Viva Mode", instantly fetch and display this first question.
+​For all subsequent Viva interactions (evaluating the user's answer and generating the next question), update the Viva endpoint to use stream: true.
+​Stream the AI's feedback and the next question directly to the frontend to create a fast, typewriter-like effect, masking the 70B processing time.
+​Step 5: RAG Optimization with Streaming for AI Tutor
+​For the PDF upload/AI Tutor feature, ensure the document is chunked and stored in a Supabase pgvector table.
+​When the user asks a question, retrieve the most relevant context chunks.
+​Pass this context to the 70B model and must use stream: true to instantly stream the answer back to the frontend UI.
+​Instructions for the Agent:
+Do not just give me a high-level summary. I want you to start modifying the code files. Begin by showing me the refactored main Node.js/Express route where the main report is generated and the Promise.allSettled() background queue is triggered for Supabase saving. Wait for my approval before moving to the frontend streaming implementation.
