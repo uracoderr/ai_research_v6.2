@@ -136,28 +136,51 @@ def _supabase_upsert(session_id: str, slug: str, topic: str, report_markdown: st
 
 
 def _supabase_fetch_one(session_id: str, slug: str) -> Optional[dict]:
+    """
+    Fetch a single report row by safe_topic.  Tries an exact session_id match
+    first (fast path for the browser that created the report); if nothing is
+    found it retries without the session filter so that reports created in a
+    previous session (different browser, cleared cookies, redeploy) are still
+    accessible.  This is intentional for a single-owner deployment — reports
+    are always that user's own data.
+    """
     if not _supabase_configured():
         return None
-    url = (
-        f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}"
-        f"?session_id=eq.{session_id}&safe_topic=eq.{slug}&select=*&limit=1"
-    )
-    try:
-        resp = requests.get(url, headers=_supabase_headers(), timeout=15)
-        resp.raise_for_status()
-        rows = resp.json()
-        return rows[0] if rows else None
-    except (requests.exceptions.RequestException, ValueError) as e:
-        logger.warning("Supabase fetch failed: %s", e)
-        return None
+
+    def _get(extra_filter: str) -> Optional[dict]:
+        url = (
+            f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}"
+            f"?{extra_filter}safe_topic=eq.{slug}&select=*&limit=1"
+        )
+        try:
+            resp = requests.get(url, headers=_supabase_headers(), timeout=15)
+            resp.raise_for_status()
+            rows = resp.json()
+            return rows[0] if rows else None
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.warning("Supabase fetch failed: %s", e)
+            return None
+
+    # Try with session filter first (exact owner match)
+    row = _get(f"session_id=eq.{session_id}&")
+    if row:
+        return row
+    # Fall back to any session — covers new browser / cleared cookies / redeploy
+    return _get("")
 
 
 def _supabase_list(session_id: str) -> List[Dict[str, str]]:
+    """
+    List all reports for this deployment.  The original version filtered by
+    session_id, which meant a new browser (new random session_id) always saw
+    an empty history even though the reports were in Supabase.  For a
+    single-owner deployment the correct behaviour is to show everything.
+    """
     if not _supabase_configured():
         return []
     url = (
         f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}"
-        f"?session_id=eq.{session_id}&select=safe_topic,topic,created_at&order=created_at.desc"
+        f"?select=safe_topic,topic,created_at&order=created_at.desc"
     )
     try:
         resp = requests.get(url, headers=_supabase_headers(), timeout=15)
