@@ -318,8 +318,16 @@ def save_thesis_session(
         )
         resp.raise_for_status()
     except requests.exceptions.RequestException as e:
-        logger.error("Supabase thesis session save failed: %s", e)
-        raise RuntimeError(f"Could not save thesis session to Supabase: {e}") from e
+        # Extract the Supabase API error body so callers can give specific guidance
+        err_detail = str(e)
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                body = e.response.json()
+                err_detail = body.get("message") or body.get("hint") or str(body)
+            except Exception:
+                err_detail = e.response.text or str(e)
+        logger.error("Supabase thesis session save failed: %s", err_detail)
+        raise RuntimeError(f"Could not save thesis session to Supabase: {err_detail}") from e
 
 
 def get_thesis_session(session_id: str, thesis_id: str) -> Optional[dict]:

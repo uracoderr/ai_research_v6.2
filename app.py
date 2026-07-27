@@ -522,7 +522,22 @@ async def run_thesis_job(job_id: str, thesis_id: str, clean_topic: str, language
         elif "429" in err_str or "rate" in err_str.lower():
             friendly = "The AI model is busy right now. Please wait a moment and try again."
         elif "Supabase" in err_str or "supabase" in err_str.lower():
-            friendly = "Could not save thesis session. Please configure SUPABASE_URL and SUPABASE_KEY."
+            if (
+                "does not exist" in err_str.lower()
+                or "thesis_sessions" in err_str.lower()
+                or "relation" in err_str.lower()
+            ):
+                friendly = (
+                    "Could not save thesis session — the 'thesis_sessions' table is missing in Supabase. "
+                    "Please create it using the SQL in replit.md."
+                )
+            elif not config.SUPABASE_URL or not config.SUPABASE_KEY:
+                friendly = "Thesis Mode requires Supabase. Please set SUPABASE_URL and SUPABASE_KEY."
+            else:
+                friendly = (
+                    "Could not save thesis session to Supabase. "
+                    "Check that your SUPABASE_URL and SUPABASE_KEY are correct and the thesis_sessions table exists."
+                )
         elif "outline" in err_str.lower():
             friendly = "Could not generate a thesis outline. Please try again or rephrase your topic."
         else:
