@@ -52,12 +52,47 @@ HIGH_TRUST_DOMAINS = [
 
 
 def _extract_json_array(text: str):
+    """
+    Robustly extract the first complete JSON array from LLM output.
+    Uses bracket-counting so it stops at the first balanced ']' and
+    ignores anything that follows — avoids the naive rfind(']') trap
+    where trailing LLM commentary causes json.loads to raise 'Extra data'.
+    """
+    import re as _re
+    cleaned = _re.sub(r"```(?:json)?\s*", "", text).strip()
+    # Fast path: whole string is already valid JSON
     try:
-        start, end = text.find("["), text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(text[start:end + 1])
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            return result
     except (json.JSONDecodeError, ValueError):
         pass
+    # Bracket-counting walk
+    start = cleaned.find("[")
+    if start == -1:
+        return None
+    depth, in_str, esc = 0, False, False
+    for i, ch in enumerate(cleaned[start:], start):
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(cleaned[start:i + 1])
+                except (json.JSONDecodeError, ValueError):
+                    return None
     return None
 
 

@@ -482,7 +482,7 @@ async def run_thesis_job(job_id: str, thesis_id: str, clean_topic: str, language
             "reading_minutes": 2,
             "confidence_score": 90,
             "mode_label": "Thesis Mode",
-            "model_used": f"NVIDIA Llama-3.1 ({config.MODEL_QUALITY.split('/')[-1]})",
+            "model_used": f"NVIDIA Llama-3.1 ({config.MODEL_QUALITY.split('/')[-1] if '/' in config.MODEL_QUALITY else config.MODEL_QUALITY})",
         }
 
         # Also save preliminary as a regular report so it appears in history
@@ -1007,6 +1007,8 @@ async def download_report(safe_topic: str, fmt: str, request: Request):
     session_id = session.read_session_id(request)
     if not session_id:
         raise HTTPException(status_code=404, detail="Report not found.")
+    if fmt not in ("md", "html"):
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'md' or 'html'.")
     path = await asyncio.to_thread(report_store.file_path_for_download, session_id, safe_topic, fmt)
     if not path:
         raise HTTPException(status_code=404, detail="Report not found.")
