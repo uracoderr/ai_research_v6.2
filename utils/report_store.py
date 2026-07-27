@@ -260,25 +260,45 @@ def load_context(session_id: str, safe_topic: str) -> Optional[str]:
 def list_reports(session_id: str) -> List[Dict[str, str]]:
     folder = session_dir(session_id)
     suffix = "_report.md"
+
+    # When Supabase is configured it is always the complete, authoritative
+    # list — every save writes to both disk AND Supabase, so Supabase is
+    # always a superset of what's on local disk.  Using disk-only here was
+    # the bug: after a redeploy (disk wiped) followed by one new research run
+    # (1 file on disk), the code stopped checking Supabase and the user saw
+    # only that 1 report instead of their full history.
+    if _supabase_configured():
+        supabase_items = _supabase_list(session_id)
+        if supabase_items:
+            # Merge: add any local-only items not yet in Supabase (edge case:
+            # a report saved to disk within the same request that the Supabase
+            # write hasn't completed yet, or a failed Supabase write).
+            supabase_slugs = {item["safe_topic"] for item in supabase_items}
+            for filename in os.listdir(folder):
+                if filename.endswith(suffix):
+                    slug = filename[: -len(suffix)]
+                    if slug not in supabase_slugs:
+                        supabase_items.append(
+                            {"safe_topic": slug, "title": slug.replace("_", " ").title()}
+                        )
+            return supabase_items
+        # Supabase returned nothing (empty list or failure) — fall through
+        # to local disk so the user still sees something.
+
+    # Local-disk-only path (Supabase not configured, or Supabase returned []).
     items = []
     for filename in os.listdir(folder):
         if filename.endswith(suffix):
             slug = filename[: -len(suffix)]
             items.append({"safe_topic": slug, "title": slug.replace("_", " ").title()})
-    # Newest first, by actual file modification time - os.listdir() order is
-    # filesystem-dependent and was never a reliable proxy for "most recent".
+
+    # Newest first by file modification time.
     def _mtime(item):
         try:
             return os.path.getmtime(os.path.join(folder, item["safe_topic"] + suffix))
         except OSError:
             return 0
     items.sort(key=_mtime, reverse=True)
-
-    if not items:
-        # Local disk has nothing for this session (e.g. right after a
-        # redeploy) - fall back to the durable Supabase copy so history
-        # isn't lost from the user's point of view.
-        items = _supabase_list(session_id)
     return items
 
 
