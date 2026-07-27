@@ -565,7 +565,8 @@
                 btn.textContent = '📜 Generate Thesis Outline';
                 btn.className = btn.className.replace('bg-teal-600 hover:bg-teal-500', 'bg-indigo-600 hover:bg-indigo-500');
             } else {
-                btn.textContent = 'Run Deep Synthesis';
+                const labels = { flash: '⚡ Generate Flash Report', assignment: 'Generate Report' };
+                btn.textContent = labels[mode] || 'Generate Report';
                 btn.className = btn.className.replace('bg-indigo-600 hover:bg-indigo-500', 'bg-teal-600 hover:bg-teal-500');
             }
         }
@@ -612,6 +613,8 @@
                         `<option value="${escapeHtml(m.id)}" ${m.id === data.default_mode ? 'selected' : ''}>${escapeHtml(m.label)}</option>`
                     ).join('');
                     modeSelect.title = data.modes.map(m => `${m.label}: ${m.description}`).join(' | ');
+                    // Sync the submit button label with the initially-selected mode
+                    updateSubmitLabel(modeSelect.value);
                 }
                 if (data.access_required && !getAccessKey()) showAccessGate();
             } catch (e) { console.error('Failed to load app meta', e); }
@@ -1168,7 +1171,8 @@
             const btn = document.getElementById('thesis-next-btn');
             const completeMsg = document.getElementById('thesis-complete-msg');
 
-            if (done >= total) {
+            // Guard: only mark complete when total is known and all sections done
+            if (total > 0 && done >= total) {
                 // All sections done
                 if (btn) btn.classList.add('hidden');
                 if (completeMsg) completeMsg.classList.remove('hidden');
