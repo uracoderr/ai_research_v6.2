@@ -4,7 +4,7 @@ An autonomous research pipeline: give it a topic, it searches the web, ranks sou
 
 ## Stack
 - **Backend**: Python 3.12, FastAPI, uvicorn
-- **LLM**: NVIDIA NIM (Llama-3.1-8B + 70B via `NVIDIA_API_KEY`)
+- **LLM**: NVIDIA NIM (Llama-3.1-70B via `NVIDIA_API_KEY`) — every tool routes through the 70B "quality" model now; the 8B "fast" model is only still used by Flash Mode's guaranteed-speed report sections (see "Model routing" below)
 - **Search**: Tavily Search API (via `TAVILY_API_KEY`)
 - **TTS**: Microsoft Edge neural voices via `edge-tts` (no API key needed)
 - **Frontend**: Single-page Tailwind CSS app (`templates/index.html`)
@@ -31,11 +31,19 @@ The workflow "Start application" does this automatically on Replit.
 1. 🎙️ **Podcast** — natural 2-host audio via Edge TTS (seamless prefetch buffering)
 2. 🧠 **Mindmap** — Mermaid.js flowchart of the report
 3. 💬 **AI Tutor** — RAG chat over your report
-4. ⚔️ **Viva Mode** — examiner-style follow-up questions
-5. 📝 **Quiz** — auto-graded MCQ + short-answer questions
+4. ⚔️ **Viva Mode** — examiner-style follow-up questions (opening question is pre-generated — see below)
+5. 📝 **Quiz** — auto-graded MCQ + short-answer questions, always exactly **15 questions** (no longer user-configurable)
 6. 📊 **PPT Generator** — slide outline ready to copy
 7. ✍️ **Humanizer** — rewrites report in natural, human style
 8. 🗂️ **Smart Flashcards** — tap-to-reveal Q&A cards for active recall
+
+## Model routing
+
+Every tool and pipeline phase (search query optimization, source ranking, report writing, and all 8 study tools) uses the 70B "quality" model. The only exception is **Flash Mode**, whose entire purpose is guaranteed speed — it still always uses the 8B "fast" model, in every language, so it stays meaningfully faster than Assignment mode. `MODEL_FAST` in `config.py` is kept defined for this reason.
+
+## Background study-tool pre-generation
+
+Right after the main research report finishes (`run_research_job` in `app.py`), a fire-and-forget background task (`asyncio.create_task`, independent of any client connection — see `_spawn_background`) generates Slides, Mindmap, Flashcards, Quiz, and the opening Viva question concurrently (`agents/report_agent.precompute_study_tools`, via `asyncio.gather(..., return_exceptions=True)` so one failure never blocks the others) and caches the results (`utils/report_store.save_tool_cache`, disk + optional Supabase — see below). The corresponding tool endpoints check this cache first, so opening a tool is instant once pre-generation finishes; a cache miss (older report, still generating, or that one tool failed) just falls back to live generation exactly as before. This currently covers the main research pipeline only — uploaded reports and Thesis Mode still generate tools on demand.
 
 ## Language support
 
@@ -85,6 +93,27 @@ CREATE INDEX IF NOT EXISTS idx_thesis_sessions_session_id
 ```
 
 The existing `reports` table is unchanged. Thesis Mode is additive — regular research, Flash and Assignment modes all continue to work without Supabase.
+
+## Background tool cache — Supabase table (optional)
+
+Pre-generated Slides/Mindmap/Flashcards/Quiz/first-Viva-question follow the same **optional** dual-write pattern as the main `reports` table (see `utils/report_store.py`): they're always saved to local disk first, and also best-effort mirrored to Supabase if configured, purely so the cache survives a redeploy/restart. Nothing breaks if you skip this — the background pre-generation and instant-load behavior work with local disk alone.
+
+To also persist it to Supabase, run this once in your **Supabase SQL Editor** (uses the same `SUPABASE_URL` / `SUPABASE_KEY` secrets as above):
+
+```sql
+CREATE TABLE IF NOT EXISTS report_tools (
+    id                   BIGSERIAL PRIMARY KEY,
+    session_id           TEXT NOT NULL,
+    safe_topic           TEXT NOT NULL,
+    slides               JSONB,
+    diagram              TEXT,
+    flashcards           JSONB,
+    quiz                 JSONB,
+    first_viva_question  TEXT,
+    created_at           TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (session_id, safe_topic)
+);
+```
 
 ## User preferences
 

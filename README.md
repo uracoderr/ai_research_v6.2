@@ -12,7 +12,8 @@ no longer kills it. Includes a CLI and a web app with six interactive tools:
 a podcast script generator with natural-sounding, accent-selectable voices
 and adjustable playback speed, a mind-map diagram, a RAG chat over your
 sources, a "debate the findings" challenge mode, a **Quiz Me / viva-prep
-self-test** (you choose how many questions, up to 20), and **one-click slide
+self-test** (a fixed 15-question set, pre-generated in the background right
+after your report so it's ready instantly), and **one-click slide
 outlines** for class presentations. Report history - including word count,
 confidence score, and generation time - can optionally persist in Supabase
 so it survives redeploys.
@@ -207,10 +208,17 @@ LLM generation time:
    words with a **3,470-token total budget — a 75% reduction**. A **"deep"**
    mode (7,000 tokens, ~50% reduction from the original) is available for
    anyone who explicitly wants the old exhaustive behaviour.
-2. **Model routing.** Lighter, more templated sections (introduction,
-   conclusion) route to the fast 8B model; only the two sections that need
-   real synthesis from source data use the 70B model. Query typo-correction
-   also moved from 70B to 8B — it never needed a large model.
+2. **Model routing (superseded — see note).** Lighter, more templated
+   sections (introduction, conclusion) originally routed to the fast 8B
+   model; only the two sections that needed real synthesis from source data
+   used the 70B model. Query typo-correction also moved from 70B to 8B — it
+   never needed a large model.
+   > **Update:** every section and tool now uses the 70B "quality" model —
+   > including introduction/conclusion and query optimization — to
+   > prioritize output quality over the token/time savings described here.
+   > **Flash Mode is the sole exception:** its entire purpose is guaranteed
+   > speed, so it still always uses 8B, in every language. `MODEL_FAST` in
+   > `config.py` is kept defined for that reason.
 3. **Faster search + tighter scrape timeouts.** Tavily search depth defaults
    to `"basic"` instead of `"advanced"` (we re-scrape every page ourselves
    anyway, so Tavily's only job is finding candidate URLs), and per-article

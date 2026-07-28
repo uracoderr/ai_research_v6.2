@@ -17,6 +17,7 @@ Design goals (full rationale in README.md):
   of the sources that were actually used, not a hardcoded 8.5 shown on
   every single report regardless of what happened during the run.
 """
+import asyncio
 import json
 import re
 import time
@@ -300,6 +301,14 @@ def generate_report(
     )
 
     report_text = header + body
+    # Reflect the models actually used by this mode's sections, rather than
+    # hardcoding "quality + fast" — since only Flash Mode still touches the
+    # fast model, every other mode now truthfully reports "quality" alone.
+    models_used = sorted({s["model"] for s in sections})
+    model_names = [
+        (config.MODEL_QUALITY if m == "quality" else config.MODEL_FAST).split("/")[-1]
+        for m in models_used
+    ]
     meta = {
         "confidence_score": confidence_score,
         "avg_credibility": avg_credibility,
@@ -307,7 +316,7 @@ def generate_report(
         "reading_minutes": reading_minutes,
         "mode": mode,
         "mode_label": mode_config["label"],
-        "model_used": f"NVIDIA Llama-3.1 ({config.MODEL_QUALITY.split('/')[-1]} + {config.MODEL_FAST.split('/')[-1]})",
+        "model_used": f"NVIDIA Llama-3.1 ({' + '.join(model_names)})",
         "language": (language or "english").lower(),
     }
     return report_text, meta
@@ -319,9 +328,7 @@ def generate_report(
 
 def generate_podcast_script(report_text: str, language: str = "english") -> List[Dict]:
     lang_instruction = _language_instruction(language)
-    # Use quality (70B) model for non-English — the 8B model frequently drifts
-    # back into English mid-script when asked to write Hindi/Hinglish JSON.
-    model = "quality" if _is_non_english(language) else "fast"
+    model = "quality"
     system = (
         f"You are a podcast scriptwriter. {lang_instruction} "
         "Output ONLY a valid JSON array of speaker objects. "
@@ -359,7 +366,7 @@ def generate_podcast_script(report_text: str, language: str = "english") -> List
         return [{"speaker": "System", "text": "Podcast generation failed. Please try again."}]
 
 
-def generate_diagram(report_text: str, language: str = "english") -> str:
+def generate_diagram(report_text: str, language: str = "english", *, timeout: int = None, retries: int = 2) -> str:
     prompt = f"""You are a strict Mermaid.js compiler. Create a flowchart summarising the core pillars of this report.
 RULES:
 1. Start exactly with 'graph TD'.
@@ -372,7 +379,7 @@ Report:
 {report_text[:5000]}
 """
     try:
-        raw = call_nvidia_api(prompt, max_tokens=700, temperature=0.1, model="fast", retries=2)
+        raw = call_nvidia_api(prompt, max_tokens=700, temperature=0.1, model="quality", retries=retries, timeout=timeout)
     except LLMError as e:
         logger.error("Diagram generation failed: %s", e)
         return "graph TD\n Z[Diagram unavailable] --> Y[Please try again]"
@@ -395,7 +402,7 @@ def rag_query(context: str, query: str, language: str = "english") -> str:
         f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nQuestion: {query}"
     )
     try:
-        return call_nvidia_api(prompt, max_tokens=700, temperature=0.2, model="fast", retries=2)
+        return call_nvidia_api(prompt, max_tokens=700, temperature=0.2, model="quality", retries=2)
     except LLMError as e:
         logger.error("RAG query failed: %s", e)
         return "Sorry, I couldn't process that question right now. Please try again."
@@ -409,24 +416,49 @@ def challenge_query(context: str, query: str, language: str = "english") -> str:
         f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nStudent's answer: {query}"
     )
     try:
-        return call_nvidia_api(prompt, max_tokens=900, temperature=0.3, model="fast", retries=2)
+        return call_nvidia_api(prompt, max_tokens=900, temperature=0.3, model="quality", retries=2)
     except LLMError as e:
         logger.error("Challenge query failed: %s", e)
         return "Sorry, I couldn't process that right now. Please try again."
+
+
+def generate_first_viva_question(report_text: str, language: str = "english", *, timeout: int = None, retries: int = 2) -> str:
+    """
+    Generates the opening examiner-style question for Viva Mode, pre-computed
+    in the background right after the report finishes so the Viva tab can
+    open with a question already on screen instead of waiting on a live call.
+    Subsequent turns still go through challenge_query() above.
+    """
+    lang_instruction = _language_instruction(language)
+    prompt = (
+        "Act as a critical, evidence-based viva/oral-exam examiner. Based ONLY on the report "
+        "below, ask ONE opening question to test the student's understanding of its most "
+        f"important idea. {lang_instruction} Return ONLY the question itself, nothing else - "
+        "no preamble, no numbering, no quotes.\n\n"
+        f"Report:\n{report_text[:config.REPORT_CONTEXT_CHAR_LIMIT]}"
+    )
+    try:
+        question = call_nvidia_api(prompt, max_tokens=200, temperature=0.4, model="quality", retries=retries, timeout=timeout)
+        return question.strip().strip('"')
+    except LLMError as e:
+        logger.error("First Viva question generation failed: %s", e)
+        return "Explain the single most important idea from this report, in your own words."
 
 
 # ---------------------------------------------------------------------------
 # Viva Prep / Auto-Quiz - self-test tool for pre-submission / pre-viva practice
 # ---------------------------------------------------------------------------
 
-def generate_quiz(report_text: str, num_questions: int = 5, language: str = "english") -> List[Dict]:
+def generate_quiz(report_text: str, num_questions: int = None, language: str = "english", *, timeout: int = None, retries: int = 2) -> List[Dict]:
     """
     Generates `num_questions` quiz questions from a finished report - a mix
     of multiple choice (instantly self-gradable in the browser) and
-    short-answer (graded by grade_short_answer() below). Uses the fast 8B
-    model.
+    short-answer (graded by grade_short_answer() below). The question count
+    is no longer a user choice — every quiz is fixed at
+    config.QUIZ_QUESTION_COUNT (15) so it can be pre-generated in the
+    background and served instantly. Uses the 70B "quality" model.
     """
-    num_questions = max(1, min(20, int(num_questions)))
+    num_questions = max(1, min(20, int(num_questions or config.QUIZ_QUESTION_COUNT)))
     mcq_count = max(1, round(num_questions * 0.6))
     short_count = max(0, num_questions - mcq_count)
     # Generation naturally needs more room the more questions are asked for;
@@ -452,7 +484,7 @@ Report:
         raw = call_nvidia_api(
             prompt,
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
-            max_tokens=max_tokens, temperature=0.4, model="fast", retries=2,
+            max_tokens=max_tokens, temperature=0.4, model="quality", retries=retries, timeout=timeout,
         )
         questions = _extract_json_array(raw)
 
@@ -480,7 +512,7 @@ Report:
 
 
 def grade_short_answer(question: str, key_points: str, student_answer: str, language: str = "english") -> Dict:
-    """Grades a free-text answer against what a good answer should cover. Uses the fast 8B model."""
+    """Grades a free-text answer against what a good answer should cover. Uses the 70B "quality" model."""
     lang_instruction = _language_instruction(language)
     prompt = f"""A student answered this practice viva/exam question. Grade it fairly and briefly.
 {lang_instruction}
@@ -496,7 +528,7 @@ Respond with STRICT JSON only, nothing else:
         raw = call_nvidia_api(
             prompt,
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
-            max_tokens=300, temperature=0.3, model="fast", retries=2,
+            max_tokens=300, temperature=0.3, model="quality", retries=2,
         )
         result = _extract_json_object(raw)
         raw_score = result.get("score", 0)
@@ -512,7 +544,7 @@ Respond with STRICT JSON only, nothing else:
 # Auto-Slides - condenses the report into a presentation outline
 # ---------------------------------------------------------------------------
 
-def generate_slides(report_text: str, language: str = "english") -> List[Dict]:
+def generate_slides(report_text: str, language: str = "english", *, timeout: int = None, retries: int = 3) -> List[Dict]:
     """
     Summarises a report into 10-12 presentation slides (short title + bullet
     points each), for a "generate my class presentation" shortcut.
@@ -547,7 +579,7 @@ Report:
         raw = call_nvidia_api(
             prompt,
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences. The array must contain 10-12 slide objects.",
-            max_tokens=2800, temperature=0.4, model="quality", retries=3,
+            max_tokens=2800, temperature=0.4, model="quality", retries=retries, timeout=timeout,
         )
         slides = _extract_json_array(raw)
 
@@ -571,15 +603,10 @@ def humanize_report(report_text: str, language: str = "english") -> str:
     """
     Rewrites the report in a more natural, conversational style to reduce
     AI-detection markers, while preserving all facts and citations.
-    Uses the quality (70B) model for non-English so language fidelity is
-    maintained. For English, the fast model is used but with enough token
-    budget to complete the full rewrite without truncating.
+    Uses the 70B "quality" model for both English and non-English text.
     """
     lang_instruction = _language_instruction(language)
-    # Quality model for non-English (8B drifts back to English / produces
-    # broken Devanagari mid-rewrite). Quality model also produces noticeably
-    # better humanization for long English reports.
-    model = "quality" if _is_non_english(language) else "fast"
+    model = "quality"
     prompt = f"""Rewrite the following AI-generated report to sound more natural, human, and
 conversational — as if a knowledgeable student wrote it themselves. Rules:
 - Keep every fact, statistic, and citation exactly as-is.
@@ -617,10 +644,10 @@ Report to rewrite:
 # Smart Flashcards - Q&A cards for active recall
 # ---------------------------------------------------------------------------
 
-def generate_flashcards(report_text: str, num_cards: int = 10, language: str = "english") -> List[Dict]:
+def generate_flashcards(report_text: str, num_cards: int = 10, language: str = "english", *, timeout: int = None, retries: int = 2) -> List[Dict]:
     """
     Generates concise question-answer flashcards from a report for active
-    recall practice. Uses the fast 8B model.
+    recall practice. Uses the 70B "quality" model.
     """
     num_cards = max(5, min(20, int(num_cards)))
     lang_instruction = _language_instruction(language)
@@ -642,8 +669,9 @@ Report:
             system="Output strictly valid JSON and nothing else - no commentary, no markdown fences.",
             max_tokens=max_tokens,
             temperature=0.4,
-            model="fast",
-            retries=2,
+            model="quality",
+            retries=retries,
+            timeout=timeout,
         )
         cards = _extract_json_array(raw)
         clean = []
@@ -656,6 +684,62 @@ Report:
     except (LLMError, json.JSONDecodeError) as e:
         logger.error("Flashcard generation failed: %s", e)
         return [{"question": "Error", "answer": "Could not generate flashcards. Please try again."}]
+
+
+# ---------------------------------------------------------------------------
+# Background study-tool pre-generation
+#
+# Right after a report finishes, the caller (app.py) fires this as a
+# non-blocking background task (asyncio.create_task, not tied to any client
+# connection). It runs Slides, Mindmap, Flashcards, Quiz and the opening
+# Viva question concurrently via asyncio.gather(..., return_exceptions=True)
+# — the same "run everything, let failures fail independently" idea as
+# JavaScript's Promise.allSettled() — so one tool erroring never blocks the
+# others, and the caller decides what to do with whichever ones succeeded.
+# The caller is responsible for persisting the results (see
+# utils/report_store.save_tool_cache); this function only generates them.
+# ---------------------------------------------------------------------------
+async def precompute_study_tools(report_text: str, language: str = "english") -> Dict[str, object]:
+    """
+    Returns a dict of whichever tools generated successfully, keyed by
+    "slides" / "diagram" / "flashcards" / "quiz" / "first_viva_question".
+    A tool that raised is simply omitted (and logged) rather than failing
+    the whole batch.
+
+    Concurrency is capped at config.BACKGROUND_TOOL_CONCURRENCY rather than
+    firing all 5 calls at once, and each call gets a longer timeout + more
+    retries (config.BACKGROUND_TOOL_TIMEOUT/RETRIES) than its live/foreground
+    equivalent - see those settings' comments for why (firing all 5 at once
+    with foreground-latency timeouts reliably triggered NVIDIA API read
+    timeouts in testing, especially for the largest outputs like the quiz
+    and slide deck). This is still a concurrent batch, just wave-limited and
+    more patient.
+    """
+    semaphore = asyncio.Semaphore(config.BACKGROUND_TOOL_CONCURRENCY)
+
+    async def _throttled(fn, *args) -> object:
+        async with semaphore:
+            return await asyncio.to_thread(
+                fn, *args, timeout=config.BACKGROUND_TOOL_TIMEOUT, retries=config.BACKGROUND_TOOL_RETRIES
+            )
+
+    task_map = {
+        "slides": _throttled(generate_slides, report_text, language),
+        "diagram": _throttled(generate_diagram, report_text, language),
+        "flashcards": _throttled(generate_flashcards, report_text, 10, language),
+        "quiz": _throttled(generate_quiz, report_text, config.QUIZ_QUESTION_COUNT, language),
+        "first_viva_question": _throttled(generate_first_viva_question, report_text, language),
+    }
+    keys = list(task_map.keys())
+    results = await asyncio.gather(*task_map.values(), return_exceptions=True)
+
+    output: Dict[str, object] = {}
+    for key, result in zip(keys, results):
+        if isinstance(result, Exception):
+            logger.warning("Background pre-generation of %r failed: %s", key, result)
+            continue
+        output[key] = result
+    return output
 
 
 # ---------------------------------------------------------------------------

@@ -468,11 +468,8 @@
                                     </div>
                                 </div>
                                 <div id="quiz-setup" class="flex flex-col items-center justify-center flex-grow text-center gap-3">
-                                    <p class="text-xs text-slate-400">How many questions would you like?</p>
-                                    <input type="number" id="quiz-count-input" min="1" max="20" value="5"
-                                           class="w-20 text-center bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500">
-                                    <p class="text-[10px] text-slate-500">Maximum 20 questions.</p>
-                                    <button onclick="startQuizMode()" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded text-xs font-bold neon-blue">Generate Quiz</button>
+                                    <p class="text-xs text-slate-400">Test yourself with a 15-question quiz covering the whole report.</p>
+                                    <button onclick="startQuizMode()" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded text-xs font-bold neon-blue">Generate Quiz (15 Questions)</button>
                                 </div>
                                 <!-- Upgrade 3: Achievement badge -->
                                 <div id="quiz-achievement" class="hidden flex-col items-center justify-center gap-1.5 py-3 border-t border-slate-800 mt-2">
@@ -699,6 +696,7 @@
             document.getElementById('challenge-chat').innerHTML = "";
             document.getElementById('report-meta').innerHTML = "";
             resetQuizSetup();
+            loadFirstVivaQuestion(safeTopic);
 
             document.getElementById('form-container').classList.add('hidden');
             document.getElementById('terminal-container').classList.add('hidden');
@@ -1013,6 +1011,12 @@
                     document.getElementById('rag-chat').innerHTML = "";
                     document.getElementById('challenge-chat').innerHTML = "";
                     resetQuizSetup();
+                    // The background pre-generation pass was only just kicked off
+                    // server-side when the report finished, so the first Viva
+                    // question usually isn't ready yet on a *fresh* report - this
+                    // call is here mainly for consistency; it's most useful when
+                    // this same report is reopened later via history.
+                    loadFirstVivaQuestion(currentTopic);
                     loadHistory();
                     return;
                 }
@@ -1145,6 +1149,10 @@
             document.getElementById('challenge-chat').innerHTML = "";
             resetQuizSetup();
             loadHistory();
+            // Note: Thesis Mode reports aren't part of the background study-tool
+            // pre-generation pass (that's scoped to the main research pipeline
+            // for now), so this will typically be a no-op cache miss.
+            loadFirstVivaQuestion(currentTopic);
 
             // Show thesis progress area and initialise the first chapter button
             const thesisArea = document.getElementById('thesis-progress-area');
@@ -1288,6 +1296,10 @@
                 statusEl.innerHTML = "";
                 input.value = "";
                 loadHistory();
+                // Note: uploaded reports skip the research pipeline entirely, so
+                // they aren't part of the background pre-generation pass either -
+                // this will typically be a no-op cache miss, same as Thesis Mode.
+                loadFirstVivaQuestion(currentTopic);
             } catch (e) {
                 statusEl.innerHTML = `<span class="text-red-400">${escapeHtml(e.message)}</span>`;
             }
@@ -1494,7 +1506,7 @@
             try {
                 const res = await apiFetch('/generate-diagram', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report, language: currentLanguage})
+                    body: JSON.stringify({report_text: report, language: currentLanguage, safe_topic: currentTopic})
                 });
                 if (!res) return;
                 if (!res.ok) throw new Error(`Server error (Status: ${res.status}).`);
@@ -1547,6 +1559,26 @@
             box.scrollTop = box.scrollHeight;
         }
 
+        // Shows the background-pre-generated opening Viva question (if the
+        // background pass has produced one for this report yet) as the
+        // first AI bubble in the Viva chat, so the tab isn't empty while
+        // waiting for the user to type first. Silently does nothing on a
+        // cache miss (older report, pre-generation still running, or it
+        // failed) - the tab just behaves like it always has.
+        async function loadFirstVivaQuestion(safeTopic) {
+            if (!safeTopic) return;
+            try {
+                const res = await fetch(`/api/tools/first-viva-question/${encodeURIComponent(safeTopic)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.question) {
+                    const box = document.getElementById('challenge-chat');
+                    box.innerHTML += `<div class="text-red-300 bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 text-xs">${escapeHtml(data.question)}</div>`;
+                    box.scrollTop = box.scrollHeight;
+                }
+            } catch (e) { /* non-critical - Viva tab still works without it */ }
+        }
+
         function sendRAG() { handleChat('/ask-rag', 'rag-input', 'rag-chat', 'text-white', 'text-emerald-300'); }
 
         function sendChallenge() {
@@ -1569,8 +1601,6 @@
         let quizCorrect  = 0;
 
         async function startQuizMode() {
-            const countInput = document.getElementById('quiz-count-input');
-            const numQuestions = Math.min(20, Math.max(1, parseInt(countInput.value, 10) || 5));
             const report = document.getElementById('report-content').innerText;
 
             quizAnswered = 0;
@@ -1581,12 +1611,12 @@
             document.getElementById('quiz-achievement').classList.add('hidden');
             const box = document.getElementById('quiz-box');
             box.classList.remove('hidden');
-            box.innerHTML = `Generating ${numQuestions} quiz question${numQuestions > 1 ? 's' : ''}...`;
+            box.innerHTML = `Loading 15 quiz questions...`;
 
             try {
                 const res = await apiFetch('/generate-quiz', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report, num_questions: numQuestions, language: currentLanguage})
+                    body: JSON.stringify({report_text: report, language: currentLanguage, safe_topic: currentTopic})
                 });
                 if (!res) return;
                 const data = await res.json();
@@ -1752,7 +1782,7 @@
             try {
                 const res = await apiFetch('/generate-slides', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report, language: currentLanguage})
+                    body: JSON.stringify({report_text: report, language: currentLanguage, safe_topic: currentTopic})
                 });
                 if (!res) return;
                 const data = await res.json();
@@ -1835,7 +1865,7 @@
             try {
                 const res = await apiFetch('/generate-flashcards', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({report_text: report, num_cards: numCards, language: currentLanguage})
+                    body: JSON.stringify({report_text: report, num_cards: numCards, language: currentLanguage, safe_topic: currentTopic})
                 });
                 if (!res) return;
                 const data = await res.json();

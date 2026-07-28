@@ -65,14 +65,32 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", 15))
 
 # ---------------------------------------------------------------------------
 # LLM model routing
-#   Light/templated sections (intro, conclusion) go to the fast 8B model;
-#   sections that need real synthesis from source data use the 70B model.
-#   This dual-routing, combined with smaller per-section token budgets
-#   below, is the single biggest lever behind the reduced generation time.
+#   2026-07: the app now routes every tool through the 70B "quality" model
+#   for consistently higher academic-quality output. MODEL_FAST is kept
+#   defined (and Flash Mode still uses it - see REPORT_MODES below) purely
+#   so it can be dialled back in without a code change if ever needed; no
+#   other call site references "fast" anymore.
 # ---------------------------------------------------------------------------
 MODEL_FAST = os.getenv("MODEL_FAST", "meta/llama-3.1-8b-instruct")
 MODEL_QUALITY = os.getenv("MODEL_QUALITY", "meta/llama-3.1-70b-instruct")
 NVIDIA_API_TIMEOUT = int(os.getenv("NVIDIA_API_TIMEOUT", 80))
+
+# Background study-tool pre-generation (see precompute_study_tools) fires up
+# to 5 quality-model calls at once. Testing showed firing all 5 truly
+# simultaneously against the NVIDIA API frequently produced read timeouts
+# (shared per-key concurrency limits) that retries couldn't absorb, so this
+# caps how many of those 5 run at the same time. Lower = more reliable but
+# slower to finish; this is a background pass with no one watching a
+# spinner, so reliability wins over shaving a few seconds off it.
+BACKGROUND_TOOL_CONCURRENCY = int(os.getenv("BACKGROUND_TOOL_CONCURRENCY", 2))
+# Same "reliability over speed" logic applies to the per-call timeout/retry
+# budget for that background pass: some of these calls (a 15-question quiz,
+# a 10-12 slide deck) ask the 70B model for thousands of output tokens,
+# which can legitimately take longer than the foreground NVIDIA_API_TIMEOUT
+# allows for. A live, user-facing call should fail fast and let the user
+# retry; a background call nobody is watching should just be patient.
+BACKGROUND_TOOL_TIMEOUT = int(os.getenv("BACKGROUND_TOOL_TIMEOUT", 150))
+BACKGROUND_TOOL_RETRIES = int(os.getenv("BACKGROUND_TOOL_RETRIES", 3))
 
 # ---------------------------------------------------------------------------
 # Result caching (search step only - see utils/cache.py)
@@ -103,6 +121,7 @@ SUPABASE_URL = _normalize_supabase_url(os.getenv("SUPABASE_URL", ""))
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "reports")
 SUPABASE_TABLE_THESIS = os.getenv("SUPABASE_TABLE_THESIS", "thesis_sessions")
+SUPABASE_TABLE_TOOLS = os.getenv("SUPABASE_TABLE_TOOLS", "report_tools")
 
 # ---------------------------------------------------------------------------
 # Cloud text-to-speech (on by default, no API key needed) - for the Podcast tool
@@ -186,7 +205,7 @@ REPORT_MODES = {
             {
                 "key": "introduction", "title": "📖 Introduction & Context",
                 "instruction": "Introduce the topic clearly: what it is, why it matters, and what this report covers.",
-                "model": "fast", "max_tokens": 700, "target_words": "350-420", "temperature": 0.4, "delay": 0.0,
+                "model": "quality", "max_tokens": 700, "target_words": "350-420", "temperature": 0.4, "delay": 0.0,
             },
             {
                 "key": "background", "title": "🧩 Core Concepts & Background",
@@ -211,12 +230,20 @@ REPORT_MODES = {
             {
                 "key": "conclusion", "title": "✅ Conclusion & Key Takeaways",
                 "instruction": "Summarise the report into 4-6 clear takeaways and a short closing paragraph. Do not introduce new facts.",
-                "model": "fast", "max_tokens": 600, "target_words": "300-360", "temperature": 0.4, "delay": 0.6,
+                "model": "quality", "max_tokens": 600, "target_words": "300-360", "temperature": 0.4, "delay": 0.6,
             },
         ],
     },
 }
 DEFAULT_REPORT_MODE = os.getenv("DEFAULT_REPORT_MODE", "assignment")
+
+# ---------------------------------------------------------------------------
+# Study tools
+# ---------------------------------------------------------------------------
+# Quiz question count is fixed (no more per-user "how many questions" picker)
+# so every report's quiz can be pre-generated in the background right after
+# the report finishes and served instantly from cache.
+QUIZ_QUESTION_COUNT = int(os.getenv("QUIZ_QUESTION_COUNT", 15))
 
 
 def validate_config() -> None:

@@ -30,6 +30,7 @@ from agents.filter_agent import filter_and_rank_articles
 from agents.report_agent import (
     challenge_query,
     generate_diagram,
+    generate_first_viva_question,
     generate_flashcards,
     generate_podcast_script,
     generate_quiz,
@@ -40,6 +41,7 @@ from agents.report_agent import (
     generate_thesis_preliminary,
     grade_short_answer,
     humanize_report,
+    precompute_study_tools,
     rag_query,
 )
 from agents.scraper_agent import scrape_top_articles
@@ -115,18 +117,25 @@ class ResearchRequest(BaseModel):
 class ReportTextRequest(BaseModel):
     report_text: str = Field(..., max_length=20000)
     language: str = "english"
+    # Optional: when present, the endpoint checks the background-generated
+    # cache for this report before falling back to a live LLM call.
+    safe_topic: str = ""
 
 
 class QuizRequest(BaseModel):
     report_text: str = Field(..., max_length=20000)
-    num_questions: int = Field(5, ge=1, le=20)
+    # Quiz length is no longer a user choice - every quiz is a fixed
+    # config.QUIZ_QUESTION_COUNT (15) questions, generated in the background
+    # right after the report finishes. See generate_quiz() for details.
     language: str = "english"
+    safe_topic: str = ""
 
 
 class FlashcardsRequest(BaseModel):
     report_text: str = Field(..., max_length=20000)
     num_cards: int = Field(10, ge=5, le=20)
     language: str = "english"
+    safe_topic: str = ""
 
 
 class TTSRequest(BaseModel):
@@ -266,6 +275,30 @@ def _prune_old_jobs() -> None:
             jobs_dict.pop(jid, None)
 
 
+async def _precompute_and_cache_tools(session_id: str, topic: str, report_text: str, language: str) -> None:
+    """Background pass kicked off right after a report finishes (see
+    run_research_job below). Generates Slides/Mindmap/Flashcards/Quiz/first
+    Viva question concurrently and caches whichever ones succeed, so the
+    corresponding tool endpoints below can serve them instantly instead of
+    making the user wait on a live LLM call. A failure here is logged and
+    swallowed - the tools still work normally via on-demand generation,
+    just without the instant-load benefit for that one report."""
+    try:
+        tools = await precompute_study_tools(report_text, language)
+    except Exception as e:
+        logger.warning("Study-tool pre-generation crashed for topic=%r: %s", topic, e)
+        return
+    if not tools:
+        logger.warning("Study-tool pre-generation produced nothing usable for topic=%r.", topic)
+        return
+    for tool_name, content in tools.items():
+        try:
+            await asyncio.to_thread(report_store.save_tool_cache, session_id, topic, tool_name, content)
+        except Exception as e:
+            logger.warning("Could not cache tool %r for topic=%r: %s", tool_name, topic, e)
+    logger.info("Background pre-generation cached for topic=%r: %s", topic, ", ".join(tools.keys()))
+
+
 async def run_research_job(job_id: str, clean_topic: str, mode: str, language: str, session_id: str) -> None:
     """The actual pipeline - identical steps to before, just reporting
     progress into RESEARCH_JOBS instead of yielding SSE events."""
@@ -383,6 +416,16 @@ async def run_research_job(job_id: str, clean_topic: str, mode: str, language: s
         logger.info(
             "Research complete: session=%s topic=%r mode=%s time=%.1fs",
             session_id, optimized_topic, mode, metrics["time_seconds"],
+        )
+
+        # Fire-and-forget: pre-generate Slides/Mindmap/Flashcards/Quiz/first
+        # Viva question now, in the background, so opening any of those
+        # tools later is an instant cache read instead of a fresh LLM call.
+        # Tied to the server's event loop (like the research job itself),
+        # not to this client connection - it keeps running even if every
+        # browser tab closes.
+        _spawn_background(
+            _precompute_and_cache_tools(session_id, optimized_topic, final_report, language)
         )
 
     except Exception as e:
@@ -760,9 +803,15 @@ async def api_podcast(request: Request, response: Response, payload: ReportTextR
 
 @app.post("/generate-diagram", dependencies=[Depends(require_access_key)])
 async def api_diagram(request: Request, response: Response, payload: ReportTextRequest):
-    session.ensure_session(request, response)
+    session_id = session.ensure_session(request, response)
+    if payload.safe_topic:
+        cached = await asyncio.to_thread(report_store.load_tool_cache, session_id, payload.safe_topic, "diagram")
+        if cached:
+            return {"mermaid": cached, "cached": True}
     try:
         mermaid_code = await asyncio.to_thread(generate_diagram, payload.report_text, payload.language)
+        if payload.safe_topic:
+            await asyncio.to_thread(report_store.save_tool_cache, session_id, payload.safe_topic, "diagram", mermaid_code)
         return {"mermaid": mermaid_code}
     except Exception as e:
         logger.error("Diagram endpoint error: %s", e)
@@ -771,13 +820,35 @@ async def api_diagram(request: Request, response: Response, payload: ReportTextR
 
 @app.post("/generate-quiz", dependencies=[Depends(require_access_key)])
 async def api_quiz(request: Request, response: Response, payload: QuizRequest):
-    session.ensure_session(request, response)
+    session_id = session.ensure_session(request, response)
+    if payload.safe_topic:
+        cached = await asyncio.to_thread(report_store.load_tool_cache, session_id, payload.safe_topic, "quiz")
+        if cached:
+            return {"questions": cached, "cached": True}
     try:
-        questions = await asyncio.to_thread(generate_quiz, payload.report_text, payload.num_questions, payload.language)
+        # Question count is always config.QUIZ_QUESTION_COUNT now - the client
+        # can no longer choose, see QuizRequest.
+        questions = await asyncio.to_thread(generate_quiz, payload.report_text, config.QUIZ_QUESTION_COUNT, payload.language)
+        if payload.safe_topic:
+            await asyncio.to_thread(report_store.save_tool_cache, session_id, payload.safe_topic, "quiz", questions)
         return {"questions": questions}
     except Exception as e:
         logger.error("Quiz endpoint error: %s", e)
         return JSONResponse(status_code=500, content={"error": "Could not generate the quiz right now."})
+
+
+@app.get("/api/tools/first-viva-question/{safe_topic}", dependencies=[Depends(require_access_key)])
+async def api_first_viva_question(safe_topic: str, request: Request, response: Response):
+    """
+    Returns the pre-generated opening Viva question for this report, if the
+    background pass has produced one yet (or None while it's still running,
+    if pre-generation failed, or for reports created before this feature).
+    The frontend shows it as the first message in the Viva chat; if None,
+    the tab just starts empty like before, waiting for the user to type.
+    """
+    session_id = session.ensure_session(request, response)
+    question = await asyncio.to_thread(report_store.load_tool_cache, session_id, safe_topic, "first_viva_question")
+    return {"question": question}
 
 
 @app.post("/generate-audio", dependencies=[Depends(require_access_key)])
@@ -913,9 +984,15 @@ async def api_grade_answer(request: Request, response: Response, payload: GradeA
 
 @app.post("/generate-slides", dependencies=[Depends(require_access_key)])
 async def api_slides(request: Request, response: Response, payload: ReportTextRequest):
-    session.ensure_session(request, response)
+    session_id = session.ensure_session(request, response)
+    if payload.safe_topic:
+        cached = await asyncio.to_thread(report_store.load_tool_cache, session_id, payload.safe_topic, "slides")
+        if cached:
+            return {"slides": cached, "cached": True}
     try:
         slides = await asyncio.to_thread(generate_slides, payload.report_text, payload.language)
+        if payload.safe_topic:
+            await asyncio.to_thread(report_store.save_tool_cache, session_id, payload.safe_topic, "slides", slides)
         return {"slides": slides}
     except Exception as e:
         logger.error("Slides endpoint error: %s", e)
@@ -963,9 +1040,18 @@ async def api_humanize(request: Request, response: Response, payload: ReportText
 
 @app.post("/generate-flashcards", dependencies=[Depends(require_access_key)])
 async def api_flashcards(request: Request, response: Response, payload: FlashcardsRequest):
-    session.ensure_session(request, response)
+    session_id = session.ensure_session(request, response)
+    # The pre-generated cache always holds 10 cards (see precompute_study_tools) -
+    # only serve it when the client is asking for that same default amount,
+    # so someone who deliberately requests 20 still gets a live 20-card set.
+    if payload.safe_topic and payload.num_cards == 10:
+        cached = await asyncio.to_thread(report_store.load_tool_cache, session_id, payload.safe_topic, "flashcards")
+        if cached:
+            return {"cards": cached, "cached": True}
     try:
         cards = await asyncio.to_thread(generate_flashcards, payload.report_text, payload.num_cards, payload.language)
+        if payload.safe_topic and payload.num_cards == 10:
+            await asyncio.to_thread(report_store.save_tool_cache, session_id, payload.safe_topic, "flashcards", cards)
         return {"cards": cards}
     except Exception as e:
         logger.error("Flashcards endpoint error: %s", e)

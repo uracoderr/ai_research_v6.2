@@ -169,6 +169,53 @@ def _supabase_fetch_one(session_id: str, slug: str) -> Optional[dict]:
     return _get("")
 
 
+def _supabase_tools_upsert(session_id: str, slug: str, tools: dict) -> None:
+    """Best-effort upsert of pre-generated study-tool content, merged with
+    whatever's already stored for this report (so caching one tool doesn't
+    clobber another tool cached moments earlier by the same background pass)."""
+    if not _supabase_configured():
+        return
+    url = f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE_TOOLS}?on_conflict=session_id,safe_topic"
+    payload = {"session_id": session_id, "safe_topic": slug, **tools}
+    try:
+        resp = requests.post(
+            url, json=payload,
+            headers=_supabase_headers(prefer="resolution=merge-duplicates,return=minimal"),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.warning("Supabase tool-cache upsert failed (cache is still saved locally): %s", e)
+
+
+def _supabase_tools_fetch_one(session_id: str, slug: str) -> Optional[dict]:
+    """Same session-first-then-global fallback as _supabase_fetch_one above,
+    for the same single-owner-deployment reason: a report generated in one
+    browser session should still serve its pre-generated tools when opened
+    from another (new cookie, cleared cookies, redeploy)."""
+    if not _supabase_configured():
+        return None
+
+    def _get(extra_filter: str) -> Optional[dict]:
+        url = (
+            f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE_TOOLS}"
+            f"?{extra_filter}safe_topic=eq.{slug}&select=*&limit=1"
+        )
+        try:
+            resp = requests.get(url, headers=_supabase_headers(), timeout=15)
+            resp.raise_for_status()
+            rows = resp.json()
+            return rows[0] if rows else None
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.warning("Supabase tool-cache fetch failed: %s", e)
+            return None
+
+    row = _get(f"session_id=eq.{session_id}&")
+    if row:
+        return row
+    return _get("")
+
+
 def _supabase_list(session_id: str) -> List[Dict[str, str]]:
     """
     List all reports for this deployment.  The original version filtered by
@@ -323,6 +370,76 @@ def list_reports(session_id: str) -> List[Dict[str, str]]:
             return 0
     items.sort(key=_mtime, reverse=True)
     return items
+
+
+# ---------------------------------------------------------------------------
+# Study-tool cache — pre-generated Slides/Mindmap/Flashcards/Quiz/first Viva
+# question, written by the background pass right after a report finishes
+# (see agents.report_agent.precompute_study_tools) so opening any of these
+# tools later is an instant cache read instead of a fresh LLM call. Same
+# optional dual-write convention as save_report/load_report_markdown above:
+# local disk is always the source of truth for this process, Supabase (if
+# configured) is a best-effort durability layer that survives redeploys.
+# ---------------------------------------------------------------------------
+_TOOL_CACHE_KEYS = ("slides", "diagram", "flashcards", "quiz", "first_viva_question")
+
+
+def _tool_cache_path(session_id: str, topic: str) -> str:
+    slug = safe_slug(topic)
+    return os.path.join(session_dir(session_id), f"{slug}_tools.json")
+
+
+def save_tool_cache(session_id: str, topic: str, tool_name: str, content) -> None:
+    """Merges `content` under `tool_name` into this report's tool-cache file
+    (and best-effort mirrors it to Supabase) without disturbing any other
+    tool already cached for the same report."""
+    if tool_name not in _TOOL_CACHE_KEYS:
+        raise ValueError(f"Unknown tool cache key: {tool_name!r}")
+    path = _tool_cache_path(session_id, topic)
+    existing: dict = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    existing[tool_name] = content
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(existing, f)
+    except (OSError, TypeError) as e:
+        logger.warning("Could not save tool cache sidecar file: %s", e)
+
+    slug = safe_slug(topic)
+    _supabase_tools_upsert(session_id, slug, {tool_name: content})
+
+
+def load_tool_cache(session_id: str, safe_topic: str, tool_name: str):
+    """Returns the cached tool content, or None on a cache miss (caller
+    should fall back to live generation) — never raises."""
+    if tool_name not in _TOOL_CACHE_KEYS:
+        return None
+    slug = safe_slug(safe_topic)
+    path = _tool_cache_path(session_id, slug)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if tool_name in data:
+                return data[tool_name]
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    row = _supabase_tools_fetch_one(session_id, slug)
+    if row and row.get(tool_name) is not None:
+        # Repopulate the local file so the next read is fast again, mirroring
+        # the fallback pattern used by load_report_markdown/load_context.
+        try:
+            save_tool_cache(session_id, slug, tool_name, row[tool_name])
+        except OSError:
+            pass
+        return row[tool_name]
+    return None
 
 
 # ---------------------------------------------------------------------------

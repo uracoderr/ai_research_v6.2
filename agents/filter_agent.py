@@ -1,7 +1,7 @@
 """
-Phase 2: drop obvious junk/social links, then ask a fast model to score
-each remaining source's credibility so the best material gets scraped
-and used in the report.
+Phase 2: drop obvious junk/social links, then ask the 70B "quality" model
+to score each remaining source's credibility so the best material gets
+scraped and used in the report.
 
 Fixes vs the original version:
 - the bare `except:` that silently swallowed every possible failure
@@ -148,7 +148,7 @@ def filter_and_rank_articles(articles: List[Dict], top_n: int = 16) -> Tuple[Lis
             system="Output strictly valid JSON arrays and nothing else.",
             max_tokens=1500,
             temperature=0.1,
-            model="fast",
+            model="quality",
             retries=2,
         )
         ranked_data = _extract_json_array(raw)
