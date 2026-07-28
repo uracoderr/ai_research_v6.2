@@ -17,8 +17,9 @@ logger = get_logger(__name__)
 
 
 def optimize_query(query: str) -> str:
-    """Fixes obvious typos in the query. Routed through the 70B "quality"
-    model, like every other call site in the app."""
+    """Fixes obvious typos in the query. Uses the fast 8B model — the task
+    is simple enough (50-token output, low temp) that the smaller model
+    performs identically while being noticeably faster."""
     logger.info("PHASE 0: optimizing query: %r", query)
     prompt = (
         "You are a strict query optimizer. Correct any spelling mistakes or typos in this "
@@ -26,7 +27,7 @@ def optimize_query(query: str) -> str:
         f"no intro text, no markdown.\nOriginal: '{query}'"
     )
     try:
-        corrected = call_nvidia_api(prompt, max_tokens=50, temperature=0.1, model="quality", retries=1)
+        corrected = call_nvidia_api(prompt, max_tokens=50, temperature=0.1, model="fast", retries=1)
         corrected = corrected.strip().strip("'\"")
         if corrected and corrected.lower() != query.lower():
             logger.info("Query auto-corrected to: %r", corrected)
@@ -39,9 +40,10 @@ def optimize_query(query: str) -> str:
 
 def _generate_sub_queries(query: str) -> List[str]:
     """
-    Uses the 70B "quality" LLM to expand one user query into 3 diverse
+    Uses the fast 8B model to expand one user query into 3 diverse
     sub-queries for better search coverage - especially useful for niche or
     ambiguous topics where a single query may miss important angles.
+    The output is short (120 tokens, 3 strings) so 8B handles it reliably.
     Falls back to a simple heuristic list if the LLM call fails.
     """
     prompt = (
@@ -51,7 +53,7 @@ def _generate_sub_queries(query: str) -> List[str]:
         '["query one", "query two", "query three"]'
     )
     try:
-        raw = call_nvidia_api(prompt, max_tokens=120, temperature=0.3, model="quality", retries=1)
+        raw = call_nvidia_api(prompt, max_tokens=120, temperature=0.3, model="fast", retries=1)
         # Strip markdown fences and try bracket-counted extraction to avoid
         # greedy-regex "Extra data" errors when the model emits extra lines.
         text = re.sub(r"```(?:json)?\s*", "", raw).strip()

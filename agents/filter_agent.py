@@ -1,5 +1,5 @@
 """
-Phase 2: drop obvious junk/social links, then ask the 70B "quality" model
+Phase 2: drop obvious junk/social links, then ask the fast 8B model
 to score each remaining source's credibility so the best material gets
 scraped and used in the report.
 
@@ -148,7 +148,7 @@ def filter_and_rank_articles(articles: List[Dict], top_n: int = 16) -> Tuple[Lis
             system="Output strictly valid JSON arrays and nothing else.",
             max_tokens=1500,
             temperature=0.1,
-            model="quality",
+            model="fast",
             retries=2,
         )
         ranked_data = _extract_json_array(raw)
