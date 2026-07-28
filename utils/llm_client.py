@@ -15,7 +15,7 @@ were swallowed by bare `except:` blocks. Centralising it here means:
 """
 import random
 import time
-from typing import Optional
+from typing import Generator, Optional
 
 import requests
 
@@ -106,6 +106,75 @@ def call_nvidia_api(
             time.sleep(1 + random.uniform(0, 0.5))
 
     raise LLMError(f"NVIDIA API failed after {retries} attempt(s): {last_error}")
+
+
+def call_nvidia_api_stream(
+    prompt: str,
+    system: str = DEFAULT_SYSTEM_PROMPT,
+    max_tokens: int = 700,
+    temperature: float = 0.2,
+    model: str = "quality",
+    timeout: int = None,
+) -> Generator[str, None, None]:
+    """
+    Streaming variant of call_nvidia_api.  Sets ``stream: true`` in the
+    NVIDIA payload and yields text chunks as they arrive over the SSE
+    connection.  Designed to run inside a thread-pool worker (called via
+    ``loop.run_in_executor``); the caller drives the async side with a
+    ``asyncio.Queue``.  Raises ``LLMError`` immediately on a non-200 or
+    unconfigured-key error so the caller can surface a clean message.
+    """
+    import json as _json
+
+    if not config.NVIDIA_API_KEY:
+        raise LLMError("NVIDIA_API_KEY is not configured.")
+
+    resolved_model = resolve_model(model)
+    timeout = timeout or config.NVIDIA_API_TIMEOUT
+    headers = {
+        "Authorization": f"Bearer {config.NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": resolved_model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+
+    response = requests.post(
+        config.NVIDIA_URL, json=payload, headers=headers,
+        timeout=timeout, stream=True,
+    )
+    if response.status_code == 429:
+        raise LLMError("NVIDIA API rate-limited (429). Please wait and try again.")
+    response.raise_for_status()
+
+    for line in response.iter_lines():
+        if not line:
+            continue
+        if isinstance(line, bytes):
+            line = line.decode("utf-8")
+        if not line.startswith("data: "):
+            continue
+        data_str = line[6:]
+        if data_str.strip() == "[DONE]":
+            break
+        try:
+            chunk_data = _json.loads(data_str)
+            delta = (
+                chunk_data.get("choices", [{}])[0]
+                .get("delta", {})
+                .get("content", "")
+            )
+            if delta:
+                yield delta
+        except (ValueError, KeyError, IndexError):
+            continue
 
 
 async def synthesize_speech(text: str, voice: str) -> Optional[bytes]:

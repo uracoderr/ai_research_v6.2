@@ -13,6 +13,7 @@ Run with:  uvicorn app:app --reload        (dev)
 """
 import asyncio
 import io
+import json
 import os
 import time
 import traceback
@@ -21,7 +22,7 @@ import uuid
 import markdown
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
@@ -29,6 +30,7 @@ import config
 from agents.filter_agent import filter_and_rank_articles
 from agents.report_agent import (
     challenge_query,
+    challenge_query_stream,
     generate_diagram,
     generate_first_viva_question,
     generate_flashcards,
@@ -43,6 +45,7 @@ from agents.report_agent import (
     humanize_report,
     precompute_study_tools,
     rag_query,
+    rag_query_stream,
 )
 from agents.scraper_agent import scrape_top_articles
 from agents.search_agent import fetch_articles, optimize_query
@@ -1001,30 +1004,108 @@ async def api_slides(request: Request, response: Response, payload: ReportTextRe
 
 @app.post("/ask-rag", dependencies=[Depends(require_access_key)])
 async def api_ask_rag(request: Request, response: Response, payload: InteractiveRequest):
+    """
+    Streams the RAG answer as SSE.  Each event is one of:
+      data: {"chunk": "<text>"}          — raw LLM token(s) (typewriter)
+      data: {"html": "<rendered-html>"}  — server-rendered markdown (sent once, after all chunks)
+      data: {"error": "<message>"}       — error fallback
+      data: [DONE]                       — stream complete
+    """
     session_id = session.ensure_session(request, response)
     context = await asyncio.to_thread(report_store.load_context, session_id, payload.safe_topic)
+
     if context is None:
-        return {"answer": "Context not found for this report. Please regenerate it."}
-    try:
-        answer = await asyncio.to_thread(rag_query, context, payload.query, payload.language)
-        return {"answer": sanitize_html(markdown.markdown(answer))}
-    except Exception as e:
-        logger.error("RAG endpoint error: %s", e)
-        return JSONResponse(status_code=500, content={"error": "Could not answer that right now."})
+        async def _no_ctx():
+            yield f"data: {json.dumps({'chunk': 'Context not found for this report. Please regenerate it.'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(_no_ctx(), media_type="text/event-stream")
+
+    async def generate():
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        parts: list = []
+
+        def _produce():
+            try:
+                for chunk in rag_query_stream(context, payload.query, payload.language):
+                    parts.append(chunk)
+                    loop.call_soon_threadsafe(queue.put_nowait, ("chunk", chunk))
+            except Exception as e:
+                logger.error("RAG stream error: %s", e)
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", "Could not answer that right now."))
+                return
+            full_text = "".join(parts)
+            rendered = sanitize_html(markdown.markdown(full_text)) if full_text else ""
+            loop.call_soon_threadsafe(queue.put_nowait, ("html", rendered))
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+        loop.run_in_executor(None, _produce)
+        while True:
+            kind, value = await queue.get()
+            if kind == "done":
+                yield "data: [DONE]\n\n"
+                break
+            elif kind == "error":
+                yield f"data: {json.dumps({'error': value})}\n\n"
+                yield "data: [DONE]\n\n"
+                break
+            else:
+                yield f"data: {json.dumps({kind: value})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/challenge-report", dependencies=[Depends(require_access_key)])
 async def api_challenge(request: Request, response: Response, payload: InteractiveRequest):
+    """
+    Streams the Viva/Challenge answer as SSE.  Same event protocol as /ask-rag:
+      data: {"chunk": "<text>"}          — raw LLM token(s) (typewriter)
+      data: {"html": "<rendered-html>"}  — server-rendered markdown (sent once, after all chunks)
+      data: {"error": "<message>"}       — error fallback
+      data: [DONE]                       — stream complete
+    """
     session_id = session.ensure_session(request, response)
     context = await asyncio.to_thread(report_store.load_context, session_id, payload.safe_topic)
+
     if context is None:
-        return {"answer": "Context not found for this report. Please regenerate it."}
-    try:
-        answer = await asyncio.to_thread(challenge_query, context, payload.query, payload.language)
-        return {"answer": sanitize_html(markdown.markdown(answer))}
-    except Exception as e:
-        logger.error("Challenge endpoint error: %s", e)
-        return JSONResponse(status_code=500, content={"error": "Could not process that right now."})
+        async def _no_ctx():
+            yield f"data: {json.dumps({'chunk': 'Context not found for this report. Please regenerate it.'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(_no_ctx(), media_type="text/event-stream")
+
+    async def generate():
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        parts: list = []
+
+        def _produce():
+            try:
+                for chunk in challenge_query_stream(context, payload.query, payload.language):
+                    parts.append(chunk)
+                    loop.call_soon_threadsafe(queue.put_nowait, ("chunk", chunk))
+            except Exception as e:
+                logger.error("Challenge stream error: %s", e)
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", "Could not process that right now."))
+                return
+            full_text = "".join(parts)
+            rendered = sanitize_html(markdown.markdown(full_text)) if full_text else ""
+            loop.call_soon_threadsafe(queue.put_nowait, ("html", rendered))
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+        loop.run_in_executor(None, _produce)
+        while True:
+            kind, value = await queue.get()
+            if kind == "done":
+                yield "data: [DONE]\n\n"
+                break
+            elif kind == "error":
+                yield f"data: {json.dumps({'error': value})}\n\n"
+                yield "data: [DONE]\n\n"
+                break
+            else:
+                yield f"data: {json.dumps({kind: value})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/humanize-report", dependencies=[Depends(require_access_key)])

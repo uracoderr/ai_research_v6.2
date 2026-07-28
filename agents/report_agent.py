@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple
 
 import config
-from utils.llm_client import LLMError, call_nvidia_api
+from utils.llm_client import LLMError, call_nvidia_api, call_nvidia_api_stream
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -420,6 +420,38 @@ def challenge_query(context: str, query: str, language: str = "english") -> str:
     except LLMError as e:
         logger.error("Challenge query failed: %s", e)
         return "Sorry, I couldn't process that right now. Please try again."
+
+
+def rag_query_stream(context: str, query: str, language: str = "english"):
+    """
+    Streaming version of ``rag_query``.  Yields raw text chunks from the
+    NVIDIA API as they arrive.  Run this inside a thread-pool worker
+    (``loop.run_in_executor``) — it uses blocking ``requests`` I/O.
+    Raises ``LLMError`` on API failure so the caller can surface a clean
+    error message without exposing internals.
+    """
+    lang_instruction = _language_instruction(language)
+    prompt = (
+        f"Answer the question using ONLY the context below. If the answer isn't in the context, say so. "
+        f"{lang_instruction}\n\n"
+        f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nQuestion: {query}"
+    )
+    yield from call_nvidia_api_stream(prompt, max_tokens=700, temperature=0.2, model="quality")
+
+
+def challenge_query_stream(context: str, query: str, language: str = "english"):
+    """
+    Streaming version of ``challenge_query``.  Yields raw text chunks from
+    the NVIDIA API.  Run inside a thread-pool worker.  Raises ``LLMError``
+    on API failure.
+    """
+    lang_instruction = _language_instruction(language)
+    prompt = (
+        f"Act as a critical, evidence-based examiner. Respond to this answer using ONLY the context below. "
+        f"Ask follow-up questions to probe deeper understanding. {lang_instruction}\n\n"
+        f"Context:\n{context[:config.REPORT_CONTEXT_CHAR_LIMIT]}\n\nStudent's answer: {query}"
+    )
+    yield from call_nvidia_api_stream(prompt, max_tokens=900, temperature=0.3, model="quality")
 
 
 def generate_first_viva_question(report_text: str, language: str = "english", *, timeout: int = None, retries: int = 2) -> str:

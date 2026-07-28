@@ -1579,10 +1579,98 @@
             } catch (e) { /* non-critical - Viva tab still works without it */ }
         }
 
-        function sendRAG() { handleChat('/ask-rag', 'rag-input', 'rag-chat', 'text-white', 'text-emerald-300'); }
+        /**
+         * Streaming version of handleChat — uses SSE (fetch + ReadableStream).
+         *
+         * The server sends three kinds of events:
+         *   data: {"chunk":"..."}   — raw LLM token(s); displayed as plain text (typewriter)
+         *   data: {"html":"..."}    — server-rendered markdown; replaces the bubble once done
+         *   data: {"error":"..."}   — error message
+         *   data: [DONE]            — stream complete
+         *
+         * Mid-stream the bubble shows plain escaped text for instant feedback.
+         * On the final "html" event it upgrades to fully rendered markdown.
+         */
+        async function handleChatStream(endpoint, inputId, boxId, userColor, aiColor, onSuccess) {
+            const input = document.getElementById(inputId);
+            const box   = document.getElementById(boxId);
+            const query = input.value.trim();
+            if (!query) return;
+            input.value = '';
+
+            _chatSeq[boxId] = (_chatSeq[boxId] || 0) + 1;
+
+            box.innerHTML += `<div class="${userColor} text-right bg-slate-800 p-1.5 rounded ml-6 text-xs">${escapeHtml(query)}</div>`;
+
+            // Create the AI bubble up-front so we can write into it incrementally.
+            const aiDiv = document.createElement('div');
+            aiDiv.className = `${aiColor} bg-slate-950 p-1.5 rounded mr-6 border border-slate-800 text-xs`;
+            aiDiv.style.fontSize = '0.75rem';
+            aiDiv.innerText = 'Thinking…';
+            box.appendChild(aiDiv);
+            box.scrollTop = box.scrollHeight;
+
+            let fullText = '';
+            try {
+                const res = await apiFetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ safe_topic: currentTopic, query, language: currentLanguage }),
+                });
+                if (!res) return; // 401 — apiFetch already showed the access-key gate
+                if (!res.ok || !res.body) {
+                    aiDiv.innerText = 'Error contacting the AI — please try again.';
+                    return;
+                }
+
+                const reader  = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                outer: while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // keep any incomplete trailing line
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const raw = line.slice(6).trim();
+                        if (raw === '[DONE]') break outer;
+                        try {
+                            const parsed = JSON.parse(raw);
+                            if (parsed.error) {
+                                aiDiv.innerText = parsed.error;
+                                if (onSuccess) onSuccess({});
+                                return;
+                            }
+                            if (parsed.chunk) {
+                                // Typewriter: append raw text, display escaped
+                                fullText += parsed.chunk;
+                                aiDiv.innerText = fullText;
+                                box.scrollTop = box.scrollHeight;
+                            }
+                            if (parsed.html) {
+                                // Final pass: upgrade to server-rendered markdown
+                                aiDiv.classList.add('markdown-body');
+                                aiDiv.innerHTML = parsed.html;
+                                box.scrollTop = box.scrollHeight;
+                            }
+                        } catch (_) { /* skip malformed SSE line */ }
+                    }
+                }
+                if (onSuccess) onSuccess({ answer: fullText });
+            } catch (e) {
+                aiDiv.innerText = 'Error contacting the AI — please try again.';
+            }
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function sendRAG() { handleChatStream('/ask-rag', 'rag-input', 'rag-chat', 'text-white', 'text-emerald-300'); }
 
         function sendChallenge() {
-            handleChat('/challenge-report', 'challenge-input', 'challenge-chat', 'text-white', 'text-red-300', () => {
+            handleChatStream('/challenge-report', 'challenge-input', 'challenge-chat', 'text-white', 'text-red-300', () => {
                 vivaCount++;
                 // Upgrade 3: Show Debate Master badge after 3 exchanges
                 if (vivaCount >= 3) {
